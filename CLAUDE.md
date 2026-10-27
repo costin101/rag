@@ -13,7 +13,7 @@ Hybrid RAG service: answers queries through a pool of ephemeral, resource-bounde
 8. **Human gate**: AI proposes, human decides — design approval and releases require explicit human confirmation.
 
 ## Stack
-Python (latest stable, pinned at implementation time and verified against the registry), Pydantic for schemas, `python-nomad` or direct Nomad HTTP, Docker. Nomad agent and vector store are external; provisioning them is out of scope.
+Python 3.14 (deliberate exception to "latest stable": `onnxruntime`, required by `fastembed`, ships cp311–cp314 wheels only; revisit when cp315 wheels ship), Pydantic for schemas, `python-nomad` or direct Nomad HTTP, Docker. Nomad agent and vector store are external; provisioning them is out of scope.
 
 ## Folder-specific rules
 Single zone `rag` (see .claude/charter.json); canon is this file. Add a folder CLAUDE.md when a folder gains its own conventions.
