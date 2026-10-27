@@ -1,4 +1,4 @@
-import math
+import traceback
 from pathlib import Path
 
 import pytest
@@ -42,6 +42,7 @@ def test_minimal_env_applies_defaults():
     assert s.RAG_TOP_K == 5
     assert s.RAG_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
     assert s.RAG_EMBED_CACHE_DIR is None
+    assert s.RAG_EMBED_REVISION is None
     assert s.QDRANT_API_KEY is None
     assert s.ANTHROPIC_API_KEY.get_secret_value() == API_KEY
     assert s.QDRANT_URL == "http://localhost:6333"
@@ -60,6 +61,7 @@ def test_all_fields_overridable():
             RAG_TOP_K="7",
             RAG_EMBED_MODEL="some/embedder",
             RAG_EMBED_CACHE_DIR="/tmp/embed-cache",
+            RAG_EMBED_REVISION="abc123",
         )
     )
     assert s.QDRANT_API_KEY.get_secret_value() == QDRANT_KEY
@@ -70,11 +72,13 @@ def test_all_fields_overridable():
     assert s.RAG_TOP_K == 7
     assert s.RAG_EMBED_MODEL == "some/embedder"
     assert s.RAG_EMBED_CACHE_DIR == Path("/tmp/embed-cache")
+    assert s.RAG_EMBED_REVISION == "abc123"
 
 
-def test_unrelated_env_vars_are_ignored():
-    s = load_settings(valid_env(PATH="/usr/bin", HOME="/home/x"))
-    assert isinstance(s, Settings)
+def test_unrelated_env_vars_are_filtered_out_before_validation():
+    # Settings forbids extras, so an unfiltered environment would raise.
+    s = load_settings(valid_env(PATH="/usr/bin", RAG_BOGUS="x", QDRANT_URL_EXTRA="y"))
+    assert set(s.model_dump()) == set(Settings.model_fields)
 
 
 def test_load_settings_defaults_to_process_environment(monkeypatch):
@@ -127,7 +131,10 @@ def test_each_required_var_individually_reported(missing):
 
 
 def test_blank_optional_falls_back_to_default():
-    s = load_settings(valid_env(RAG_TOP_K="  ", RAG_MODEL="", QDRANT_API_KEY=" "))
+    s = load_settings(
+        valid_env(RAG_TOP_K="  ", RAG_MODEL="", QDRANT_API_KEY=" ", RAG_EMBED_REVISION="\t")
+    )
+    assert s.RAG_EMBED_REVISION is None
     assert s.RAG_TOP_K == 5
     assert s.RAG_MODEL == "claude-sonnet-5-5"
     assert s.QDRANT_API_KEY is None
@@ -142,7 +149,7 @@ def test_missing_and_invalid_reported_in_one_error():
 # --- numeric bounds ----------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["0", "-1", "abc", "1.5", "51", "true"])
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "1.5", "51", "true", "1_0", "+5", "１０", "0x5"])
 def test_invalid_top_k(bad):
     err = error_for(valid_env(RAG_TOP_K=bad))
     assert "RAG_TOP_K" in str(err)
@@ -154,20 +161,15 @@ def test_top_k_bounds_inclusive(good):
 
 
 @pytest.mark.parametrize("name", ["RAG_MAX_TOKENS"])
-@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5"])
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5", "1_0", "1_000"])
 def test_invalid_positive_int(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
 
 
 @pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
-@pytest.mark.parametrize("bad", ["0", "-1", "abc", "nan", "inf", "-inf"])
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "nan", "inf", "-inf", "1_0", "1_0.5"])
 def test_invalid_positive_float(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
-
-
-def test_timeouts_must_be_finite_numbers():
-    s = load_settings(valid_env(RAG_PROVIDER_TIMEOUT_S="0.5"))
-    assert math.isfinite(s.RAG_PROVIDER_TIMEOUT_S)
 
 
 def test_unknown_provider_rejected():
@@ -189,6 +191,19 @@ def test_unknown_provider_rejected():
         "not a url",
         "file:///etc/passwd",
         "http://user:pw@host:6333",
+        "https://TOKEN@host",
+        "https://@host",
+        "https://host:6333/?api-key=KEY",
+        "https://host:6333?",
+        "https://host#frag",
+        "http://host:abc",
+        "http://host:99999",
+        "http://host:0",
+        "http://host :6333",
+        "http://ho st",
+        "http://host:6333,http://other:6333",
+        "http://[::1",
+        "http://host\x00",
     ],
 )
 def test_invalid_qdrant_url(bad):
@@ -198,6 +213,17 @@ def test_invalid_qdrant_url(bad):
 @pytest.mark.parametrize("good", ["http://localhost:6333", "https://q.example.com"])
 def test_valid_qdrant_url(good):
     assert load_settings(valid_env(QDRANT_URL=good)).QDRANT_URL == good
+
+
+def test_url_reasons_are_distinct_per_problem():
+    cases = {
+        "ftp://host": "http(s)",
+        "https://TOKEN@host": "credentials",
+        "https://host/?k=v": "query",
+        "http://host:abc": "port",
+    }
+    for url, word in cases.items():
+        assert word in str(error_for(valid_env(QDRANT_URL=url)))
 
 
 def test_https_required_when_qdrant_api_key_set():
@@ -210,6 +236,11 @@ def test_https_with_qdrant_api_key_accepted():
     assert s.QDRANT_API_KEY.get_secret_value() == QDRANT_KEY
 
 
+def test_https_check_is_scheme_case_insensitive():
+    s = load_settings(valid_env(QDRANT_URL="HTTPS://q.example.com", QDRANT_API_KEY=QDRANT_KEY))
+    assert s.QDRANT_URL == "HTTPS://q.example.com"
+
+
 def test_http_without_qdrant_api_key_accepted():
     assert load_settings(valid_env(QDRANT_URL="http://q.example.com")).QDRANT_API_KEY is None
 
@@ -217,17 +248,41 @@ def test_http_without_qdrant_api_key_accepted():
 # --- no value leakage --------------------------------------------------------
 
 
+def full_trace(err):
+    return "".join(traceback.format_exception(err))
+
+
 def test_secret_values_never_in_error():
     env = valid_env(
-        ANTHROPIC_API_KEY="test-not-a-key-LEAK-anthropic",
         QDRANT_API_KEY="test-not-a-key-LEAK-qdrant",
         QDRANT_URL="http://q.example.com",  # invalid: http while a key is set
         RAG_TOP_K="LEAK-top-k",
     )
     err = error_for(env)
-    text = f"{err} {err!r} {err.args}"
+    text = f"{err} {err!r} {err.args} {full_trace(err)}"
     assert "LEAK" not in text
+
+
+def test_error_carries_no_exception_context():
+    err = error_for(valid_env(RAG_TOP_K="LEAK"))
     assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://user:LEAKPW@host:6333",
+        "https://LEAKTOKEN@host",
+        "https://host:6333/?api-key=LEAKQ",
+        "https://host#LEAKFRAG",
+        "http://host:LEAKPORT",
+    ],
+)
+def test_bad_url_never_echoed_anywhere_in_traceback(url):
+    err = error_for(valid_env(QDRANT_URL=url, QDRANT_API_KEY="test-not-a-key-LEAK-key"))
+    text = f"{err} {err!r} {full_trace(err)}"
+    assert "LEAK" not in text
 
 
 @pytest.mark.parametrize(
@@ -239,17 +294,25 @@ def test_secret_values_never_in_error():
         ("RAG_PROVIDER_TIMEOUT_S", "LEAK"),
         ("QDRANT_TIMEOUT_S", "LEAK"),
         ("RAG_PROVIDER", "LEAK"),
+        ("RAG_EMBED_CACHE_DIR", "LEAK\x00"),
     ],
 )
 def test_bad_values_never_echoed(name, bad):
     err = error_for(valid_env(**{name: bad}))
     assert name in str(err)
-    assert "LEAK" not in f"{err} {err!r}"
+    assert "LEAK" not in f"{err} {err!r} {full_trace(err)}"
 
 
-def test_url_credentials_never_echoed():
-    err = error_for(valid_env(QDRANT_URL="http://user:LEAKPW@host:6333"))
-    assert "LEAKPW" not in f"{err} {err!r}"
+def test_settings_validation_error_hides_input_when_validated_directly():
+    # hide_input_in_errors must be set on Settings itself, not only via load_settings.
+    with pytest.raises(ValidationError) as excinfo:
+        Settings.model_validate({**valid_env(), "RAG_TOP_K": "MARKERVALUE"})
+    assert "MARKERVALUE" not in str(excinfo.value)
+    assert "MARKERVALUE" not in repr(excinfo.value)
+
+
+def test_settings_config_hides_input():
+    assert Settings.model_config["hide_input_in_errors"] is True
 
 
 def test_settings_repr_and_str_hide_secrets():
@@ -267,3 +330,20 @@ def test_settings_repr_and_str_hide_secrets():
 def test_config_error_is_config_invalid():
     err = error_for({})
     assert str(err).startswith("config_invalid: ")
+
+
+# --- strict numeric parsing, cache dir, revision -----------------------------
+
+
+def test_cache_dir_rejects_nul_byte():
+    assert "RAG_EMBED_CACHE_DIR" in str(error_for(valid_env(RAG_EMBED_CACHE_DIR="/tmp/a\x00b")))
+
+
+def test_embed_revision_is_optional_string():
+    assert load_settings(valid_env()).RAG_EMBED_REVISION is None
+    assert load_settings(valid_env(RAG_EMBED_REVISION=" deadbeef ")).RAG_EMBED_REVISION == "deadbeef"
+
+
+@pytest.mark.parametrize("good", ["0.5", "2", "30.25"])
+def test_plain_decimal_timeouts_accepted(good):
+    assert load_settings(valid_env(QDRANT_TIMEOUT_S=good)).QDRANT_TIMEOUT_S == float(good)

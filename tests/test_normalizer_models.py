@@ -1,8 +1,9 @@
+import inspect
 import json
 import math
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from normalizer import (
     ConfigError,
@@ -63,10 +64,40 @@ def test_path_specific_fields_are_rejected(field):
         RAGResponse.model_validate(response(**{field: "api"}))
 
 
-@pytest.mark.parametrize("blank", ["", " ", "\n\t "])
+@pytest.mark.parametrize(
+    "blank",
+    [
+        "",
+        " ",
+        "\n\t ",
+        "\u200b",  # zero-width space
+        "\ufeff",  # BOM / zero-width no-break space
+        "\u00a0",  # no-break space
+        "\u2003\u3000",  # em space, ideographic space
+        "\u200b \u200d\u2060",
+    ],
+)
 def test_blank_answer_rejected(blank):
     with pytest.raises(ValidationError):
         RAGResponse.model_validate(response(answer=blank))
+
+
+def test_answer_with_visible_text_among_invisibles_is_kept():
+    r = RAGResponse.model_validate(response(answer="\u200b hi \u200b"))
+    assert r.answer == "\u200b hi \u200b"
+
+
+def test_empty_chunks_and_sources_are_valid_at_model_level():
+    # Emptiness is a pipeline concern (empty_retrieval); the model only pins shape.
+    r = RAGResponse.model_validate(response(chunks=[], sources=[]))
+    assert r.chunks == [] and r.sources == []
+
+
+def test_freezing_is_shallow_lists_stay_mutable():
+    # Documents (does not endorse) the limitation: frozen blocks attribute assignment only.
+    r = RAGResponse.model_validate(response())
+    r.chunks.append(ContextChunk(**chunk(id="c2")))
+    assert len(r.chunks) == 2
 
 
 def test_non_string_answer_rejected():
@@ -163,6 +194,29 @@ def test_source_coerces_other_uris_to_none(uri):
     assert Source(id="s1", title="t", uri=uri).uri is None
 
 
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://LEAKTOKEN@example.com/a",
+        "https://user:LEAKPW@example.com/a",
+        "https://@example.com/a",
+        "https://example.com:abc/a",
+        "https://example.com:99999/a",
+        "https://example.com:0/a",
+        "https://exa mple.com/a",
+        "https://example.com/a b",
+        "https://example.com/a\nb",
+    ],
+)
+def test_source_coerces_userinfo_bad_ports_and_whitespace_to_none(uri):
+    assert Source(id="s1", uri=uri).uri is None
+
+
+def test_source_keeps_query_fragment_and_port():
+    uri = "https://example.com:8443/a?q=1#top"
+    assert Source(id="s1", uri=uri).uri == uri
+
+
 def test_source_non_string_uri_rejected():
     with pytest.raises(ValidationError):
         Source(id="s1", uri=5)
@@ -212,10 +266,22 @@ def test_metrics_valid():
     assert Metrics(latency_ms=1.5).latency_ms == 1.5
 
 
-@pytest.mark.parametrize("bad", [-0.1, math.nan, math.inf, -math.inf, "fast", None])
+@pytest.mark.parametrize(
+    "bad", [-0.1, math.nan, math.inf, -math.inf, "fast", "5", None, True, False]
+)
 def test_metrics_rejects_negative_nonfinite_or_non_numeric(bad):
     with pytest.raises(ValidationError):
         Metrics(latency_ms=bad)
+
+
+@pytest.mark.parametrize("raw", ["true", "false", '"5"', "null"])
+def test_metrics_json_is_strict(raw):
+    with pytest.raises(ValidationError):
+        Metrics.model_validate_json('{"latency_ms": ' + raw + "}")
+
+
+def test_metrics_json_accepts_numbers():
+    assert Metrics.model_validate_json('{"latency_ms": 5}').latency_ms == 5.0
 
 
 def test_metrics_extra_forbidden_and_frozen():
@@ -272,3 +338,72 @@ def test_base_error_takes_explicit_code():
     e = RAGError(ErrorCode.RETRIEVAL_FAILED, "boom")
     assert e.code is ErrorCode.RETRIEVAL_FAILED
     assert str(e) == "retrieval_failed: boom"
+
+
+# --- structural guards over every model --------------------------------------
+
+EXPECTED_FIELDS = {
+    "ContextChunk": {"id", "text", "score", "source_id"},
+    "Source": {"id", "title", "uri"},
+    "Usage": {"input_tokens", "output_tokens"},
+    "Metrics": {"latency_ms"},
+    "RAGResponse": {"answer", "chunks", "sources", "usage", "metrics"},
+}
+
+
+def normalizer_models():
+    import normalizer
+
+    return {
+        name: obj
+        for name, obj in vars(normalizer).items()
+        if inspect.isclass(obj)
+        and issubclass(obj, BaseModel)
+        and obj.__module__ == "normalizer"
+        and not name.startswith("_")
+    }
+
+
+def test_every_model_has_exactly_its_contract_fields():
+    assert {n: set(m.model_fields) for n, m in normalizer_models().items()} == EXPECTED_FIELDS
+
+
+def property_names(node):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "properties":
+                yield from value
+            yield from property_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from property_names(item)
+
+
+def test_no_path_or_provider_property_anywhere_in_the_schema():
+    names = set(property_names(RAGResponse.model_json_schema()))
+    assert names.isdisjoint({"path", "provider"})
+    assert names == set().union(*EXPECTED_FIELDS.values())
+
+
+def test_every_model_forbids_extras_is_frozen_and_hides_input():
+    for name, model in normalizer_models().items():
+        cfg = model.model_config
+        assert cfg.get("extra") == "forbid", name
+        assert cfg.get("frozen") is True, name
+        assert cfg.get("hide_input_in_errors") is True, name
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda m: ContextChunk(**chunk(score=m)),
+        lambda m: Usage(input_tokens=m, output_tokens=1),
+        lambda m: Metrics(latency_ms=m),
+        lambda m: Source(id=m, uri=5),
+        lambda m: RAGResponse.model_validate(response(answer=m, usage=m)),
+    ],
+)
+def test_validation_errors_never_echo_input(factory):
+    with pytest.raises(ValidationError) as excinfo:
+        factory("MARKERVALUE")
+    assert "MARKERVALUE" not in str(excinfo.value)

@@ -4,6 +4,7 @@ Path adapters (generation -> RAGResponse) are added here by later stories; vendo
 payload formats never live in this module.
 """
 
+import unicodedata
 from enum import StrEnum
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -11,6 +12,30 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator
 
 _HTTP_SCHEMES = ("http", "https")
+
+
+def url_problem(url: str, *, allow_query: bool) -> str | None:
+    """Reason `url` is not a safe plain http(s) URL, or None. Never echoes the URL.
+
+    Rejects whitespace/control characters, other schemes, missing host, embedded
+    userinfo, an invalid port, and (unless allow_query) a query string or fragment.
+    """
+    if any(c.isspace() or unicodedata.category(c) == "Cc" for c in url):
+        return "must not contain whitespace or control characters"
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return "has an invalid port or host"
+    if parts.scheme not in _HTTP_SCHEMES or not parts.hostname:
+        return "must be an http(s) URL with a host"
+    if "@" in parts.netloc:
+        return "must not embed credentials"
+    if port == 0:
+        return "has an invalid port or host"
+    if not allow_query and ("?" in url or "#" in url):
+        return "must not contain a query string or fragment"
+    return None
 
 
 class _Model(BaseModel):
@@ -37,10 +62,7 @@ class Source(_Model):
     def _http_uri_only(cls, uri: str | None) -> str | None:
         if uri is None:
             return None
-        parts = urlsplit(uri)
-        if parts.scheme in _HTTP_SCHEMES and parts.hostname:
-            return uri
-        return None
+        return None if url_problem(uri, allow_query=True) else uri
 
 
 class Usage(_Model):
@@ -49,11 +71,17 @@ class Usage(_Model):
 
 
 class Metrics(_Model):
-    latency_ms: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+    latency_ms: Annotated[StrictFloat, Field(ge=0, allow_inf_nan=False)]
+
+
+def _invisible(char: str) -> bool:
+    # Whitespace plus Unicode format characters (zero-width space, BOM, joiners).
+    return char.isspace() or unicodedata.category(char) == "Cf"
 
 
 class RAGResponse(_Model):
     answer: str
+    # frozen=True blocks attribute assignment only; the lists themselves stay mutable.
     chunks: list[ContextChunk]
     sources: list[Source]
     usage: Usage
@@ -62,7 +90,7 @@ class RAGResponse(_Model):
     @field_validator("answer")
     @classmethod
     def _answer_not_blank(cls, answer: str) -> str:
-        if not answer.strip():
+        if all(_invisible(c) for c in answer):
             raise ValueError("answer must not be blank")
         return answer
 

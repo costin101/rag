@@ -4,10 +4,10 @@ Errors name every bad variable and the reason, never a value.
 """
 
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
@@ -19,9 +19,13 @@ from pydantic import (
     field_validator,
 )
 
-from normalizer import ConfigError
+from normalizer import ConfigError, url_problem
 
 PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+
+# Env numbers are plain decimals only: no signs, underscores, exponents or non-ASCII digits.
+_WHOLE = re.compile(r"[0-9]+")
+_DECIMAL = re.compile(r"[0-9]+(\.[0-9]+)?")
 
 
 class Settings(BaseModel):
@@ -41,17 +45,37 @@ class Settings(BaseModel):
 
     RAG_TOP_K: int = Field(default=5, ge=1, le=50)
     RAG_EMBED_MODEL: str = "BAAI/bge-small-en-v1.5"
+    RAG_EMBED_REVISION: str | None = None
     RAG_EMBED_CACHE_DIR: Path | None = None
+
+    @field_validator("RAG_MAX_TOKENS", "RAG_TOP_K", mode="before")
+    @classmethod
+    def _whole_number(cls, value):
+        if isinstance(value, str) and not _WHOLE.fullmatch(value):
+            raise ValueError("must be a whole number")
+        return value
+
+    @field_validator("RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S", mode="before")
+    @classmethod
+    def _decimal_number(cls, value):
+        if isinstance(value, str) and not _DECIMAL.fullmatch(value):
+            raise ValueError("must be a plain decimal number")
+        return value
+
+    @field_validator("RAG_EMBED_CACHE_DIR", mode="before")
+    @classmethod
+    def _no_nul(cls, value):
+        if isinstance(value, str) and "\0" in value:
+            raise ValueError("must not contain a NUL byte")
+        return value
 
     @field_validator("QDRANT_URL")
     @classmethod
     def _http_url(cls, url: str, info: ValidationInfo) -> str:
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname:
-            raise ValueError("must be an http(s) URL with a host")
-        if parts.username is not None or parts.password is not None:
-            raise ValueError("must not embed credentials")
-        if info.data.get("QDRANT_API_KEY") is not None and parts.scheme != "https":
+        problem = url_problem(url, allow_query=False)
+        if problem:
+            raise ValueError(problem)
+        if info.data.get("QDRANT_API_KEY") is not None and not url.lower().startswith("https://"):
             raise ValueError("must be https when QDRANT_API_KEY is set")
         return url
 
@@ -75,4 +99,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         return Settings.model_validate(values)
     except ValidationError as exc:
         problems = "; ".join(f"{e['loc'][0]}: {_reason(e)}" for e in exc.errors())
-        raise ConfigError(f"invalid configuration: {problems}") from None
+    # Raised outside the except block so the error carries no __context__ to trace back.
+    raise ConfigError(f"invalid configuration: {problems}")

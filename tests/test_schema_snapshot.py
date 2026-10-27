@@ -3,6 +3,9 @@
 To accept an intentional contract change, regenerate the committed snapshot and review the diff:
 
     python -m tests.test_schema_snapshot
+
+Regeneration needs human review: never regenerate just to turn the test green. Check the
+diff for new or renamed fields (in particular any `path`/`provider`) before committing it.
 """
 
 import json
