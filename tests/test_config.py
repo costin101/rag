@@ -161,13 +161,16 @@ def test_top_k_bounds_inclusive(good):
 
 
 @pytest.mark.parametrize("name", ["RAG_MAX_TOKENS"])
-@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5", "1_0", "1_000"])
+@pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5", "1_0", "1_000", "200001", "99999999999"])
 def test_invalid_positive_int(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
 
 
 @pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
-@pytest.mark.parametrize("bad", ["0", "-1", "abc", "nan", "inf", "-inf", "1_0", "1_0.5"])
+@pytest.mark.parametrize(
+    "bad",
+    ["0", "-1", "abc", "nan", "inf", "-inf", "1_0", "1_0.5", "1e3", "1e0", "1e-1", "+5", "5.", ".5", "601"],
+)
 def test_invalid_positive_float(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
 
@@ -204,6 +207,11 @@ def test_unknown_provider_rejected():
         "http://host:6333,http://other:6333",
         "http://[::1",
         "http://host\x00",
+        "http://host:",
+        "http://host:/path",
+        "https://host:6333/path;param",
+        "https://host;x:6333",
+        "https://host\u200b:6333",
     ],
 )
 def test_invalid_qdrant_url(bad):
@@ -347,3 +355,112 @@ def test_embed_revision_is_optional_string():
 @pytest.mark.parametrize("good", ["0.5", "2", "30.25"])
 def test_plain_decimal_timeouts_accepted(good):
     assert load_settings(valid_env(QDRANT_TIMEOUT_S=good)).QDRANT_TIMEOUT_S == float(good)
+
+
+# --- upper bounds ------------------------------------------------------------
+
+
+def test_max_tokens_upper_bound_inclusive():
+    assert load_settings(valid_env(RAG_MAX_TOKENS="200000")).RAG_MAX_TOKENS == 200000
+
+
+@pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
+def test_timeout_upper_bound_inclusive(name):
+    assert getattr(load_settings(valid_env(**{name: "600"})), name) == 600
+    assert name in str(error_for(valid_env(**{name: "600.01"})))
+
+
+# --- API keys: no hidden characters ------------------------------------------
+
+KEY_NAMES = ("ANTHROPIC_API_KEY", "QDRANT_API_KEY")
+HIDDEN_CHARS = {
+    "newline": "\n",
+    "tab": "\t",
+    "carriage return": "\r",
+    "space": " ",
+    "nbsp": "\u00a0",
+    "line separator": "\u2028",
+    "nul (Cc)": "\x00",
+    "del (Cc)": "\x7f",
+    "zero-width space (Cf)": "\u200b",
+    "bom (Cf)": "\ufeff",
+}
+
+
+@pytest.mark.parametrize("key_name", KEY_NAMES)
+@pytest.mark.parametrize("char", HIDDEN_CHARS.values(), ids=HIDDEN_CHARS.keys())
+def test_api_key_with_interior_hidden_character_rejected(key_name, char):
+    env = valid_env(QDRANT_URL="https://q.example.com", QDRANT_API_KEY="test-not-a-key-ok")
+    env[key_name] = f"LEAK{char}SECRET"
+    err = error_for(env)
+    assert key_name in str(err)
+    assert "must not contain whitespace or control characters" in str(err)
+    other = next(n for n in KEY_NAMES if n != key_name)
+    assert other not in str(err)
+    text = f"{err} {err!r} {full_trace(err)}"
+    assert "LEAK" not in text and "SECRET" not in text
+
+
+@pytest.mark.parametrize("key_name", KEY_NAMES)
+@pytest.mark.parametrize("char", HIDDEN_CHARS.values(), ids=HIDDEN_CHARS.keys())
+def test_api_key_hidden_character_rejected_on_direct_construction(key_name, char):
+    fields = {
+        "ANTHROPIC_API_KEY": "test-not-a-key",
+        "QDRANT_API_KEY": "test-not-a-key",
+        "QDRANT_URL": "https://q.example.com",
+        "QDRANT_COLLECTION": "docs",
+    }
+    fields[key_name] = f"LEAK{char}SECRET"
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(**fields)
+    assert "LEAK" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("key_name", KEY_NAMES)
+@pytest.mark.parametrize("blank", ["", " ", "\u200b"])
+def test_api_key_empty_on_direct_construction_rejected(key_name, blank):
+    fields = {
+        "ANTHROPIC_API_KEY": "test-not-a-key",
+        "QDRANT_API_KEY": "test-not-a-key",
+        "QDRANT_URL": "https://q.example.com",
+        "QDRANT_COLLECTION": "docs",
+    }
+    fields[key_name] = blank
+    with pytest.raises(ValidationError):
+        Settings(**fields)
+
+
+def test_api_key_edge_whitespace_is_stripped_not_rejected():
+    s = load_settings(valid_env(ANTHROPIC_API_KEY="  test-not-a-key\n"))
+    assert s.ANTHROPIC_API_KEY.get_secret_value() == "test-not-a-key"
+
+
+# --- direct construction is strict -------------------------------------------
+
+DIRECT = {
+    "ANTHROPIC_API_KEY": "test-not-a-key",
+    "QDRANT_URL": "http://localhost:6333",
+    "QDRANT_COLLECTION": "docs",
+}
+
+
+@pytest.mark.parametrize(
+    "name,bad",
+    [
+        ("RAG_TOP_K", True),
+        ("RAG_TOP_K", 2.0),
+        ("RAG_MAX_TOKENS", True),
+        ("RAG_MAX_TOKENS", 2.0),
+        ("RAG_PROVIDER_TIMEOUT_S", True),
+        ("QDRANT_TIMEOUT_S", True),
+        ("QDRANT_TIMEOUT_S", False),
+    ],
+)
+def test_direct_construction_rejects_bool_and_float_for_int(name, bad):
+    with pytest.raises(ValidationError):
+        Settings(**DIRECT, **{name: bad})
+
+
+def test_direct_construction_accepts_native_numbers_and_numeric_strings():
+    s = Settings(**DIRECT, RAG_TOP_K=7, QDRANT_TIMEOUT_S=2, RAG_MAX_TOKENS="9")
+    assert (s.RAG_TOP_K, s.QDRANT_TIMEOUT_S, s.RAG_MAX_TOKENS) == (7, 2.0, 9)

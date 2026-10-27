@@ -14,13 +14,19 @@ from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field
 _HTTP_SCHEMES = ("http", "https")
 
 
+def has_hidden_chars(text: str) -> bool:
+    """True if `text` contains whitespace or a control/format character anywhere."""
+    return any(c.isspace() or unicodedata.category(c) in ("Cc", "Cf") for c in text)
+
+
 def url_problem(url: str, *, allow_query: bool) -> str | None:
     """Reason `url` is not a safe plain http(s) URL, or None. Never echoes the URL.
 
     Rejects whitespace/control characters, other schemes, missing host, embedded
-    userinfo, an invalid port, and (unless allow_query) a query string or fragment.
+    userinfo, an empty or invalid port, and (unless allow_query) a query string,
+    path parameter (';') or fragment.
     """
-    if any(c.isspace() or unicodedata.category(c) == "Cc" for c in url):
+    if has_hidden_chars(url):
         return "must not contain whitespace or control characters"
     try:
         parts = urlsplit(url)
@@ -31,18 +37,20 @@ def url_problem(url: str, *, allow_query: bool) -> str | None:
         return "must be an http(s) URL with a host"
     if "@" in parts.netloc:
         return "must not embed credentials"
-    if port == 0:
+    if port == 0 or parts.netloc.endswith(":"):
         return "has an invalid port or host"
-    if not allow_query and ("?" in url or "#" in url):
-        return "must not contain a query string or fragment"
+    if not allow_query and any(c in url for c in "?#;"):
+        return "must not contain a query string, ';' or fragment"
     return None
+
+
+TokenCount = Annotated[StrictInt, Field(ge=0, le=10**12)]
 
 
 class _Model(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
-TokenCount = Annotated[StrictInt, Field(ge=0)]
 
 
 class ContextChunk(_Model):
@@ -71,12 +79,22 @@ class Usage(_Model):
 
 
 class Metrics(_Model):
-    latency_ms: Annotated[StrictFloat, Field(ge=0, allow_inf_nan=False)]
+    latency_ms: Annotated[StrictFloat, Field(ge=0, le=10**9, allow_inf_nan=False)]
+
+
+# Visible-looking-blank characters outside the Zs/Zl/Zp/Cc/Cf categories: Hangul and
+# Khmer fillers, braille blank, combining grapheme joiner, variation selectors.
+_BLANK_LOOKALIKES = frozenset("\u034f\u115f\u1160\u17b4\u17b5\u2800\u3164\uffa0") | frozenset(
+    chr(c) for c in range(0xFE00, 0xFE10)
+)
 
 
 def _invisible(char: str) -> bool:
-    # Whitespace plus Unicode format characters (zero-width space, BOM, joiners).
-    return char.isspace() or unicodedata.category(char) == "Cf"
+    return (
+        char.isspace()
+        or unicodedata.category(char) in ("Cc", "Cf", "Zs", "Zl", "Zp")
+        or char in _BLANK_LOOKALIKES
+    )
 
 
 class RAGResponse(_Model):

@@ -75,6 +75,19 @@ def test_path_specific_fields_are_rejected(field):
         "\u00a0",  # no-break space
         "\u2003\u3000",  # em space, ideographic space
         "\u200b \u200d\u2060",
+        "\x00",  # Cc
+        "\x7f",  # Cc
+        "\u0085",  # Cc (NEL)
+        "\u3164",  # Hangul filler
+        "\u2800",  # Braille blank
+        "\u034f",  # combining grapheme joiner
+        "\u115f\u1160",  # Hangul choseong/jungseong fillers
+        "\uffa0",  # halfwidth Hangul filler
+        "\u17b4\u17b5",  # Khmer inherent vowels
+        "\u180e",  # Mongolian vowel separator
+        "\u2062\u2063\u2064",  # invisible operators
+        "\ufe0f",  # variation selector
+        "\u2028\u2029",  # line/paragraph separators
     ],
 )
 def test_blank_answer_rejected(blank):
@@ -245,6 +258,14 @@ def test_usage_rejects_non_strict_or_negative_ints(field, bad):
         Usage(**data)
 
 
+def test_usage_upper_bound_inclusive():
+    assert Usage(input_tokens=10**12, output_tokens=10**12).input_tokens == 10**12
+    with pytest.raises(ValidationError):
+        Usage(input_tokens=10**12 + 1, output_tokens=0)
+    with pytest.raises(ValidationError):
+        Usage(input_tokens=0, output_tokens=10**12 + 1)
+
+
 def test_usage_extra_forbidden_and_frozen():
     with pytest.raises(ValidationError):
         Usage(input_tokens=1, output_tokens=1, total_tokens=2)
@@ -282,6 +303,12 @@ def test_metrics_json_is_strict(raw):
 
 def test_metrics_json_accepts_numbers():
     assert Metrics.model_validate_json('{"latency_ms": 5}').latency_ms == 5.0
+
+
+def test_metrics_upper_bound_inclusive():
+    assert Metrics(latency_ms=1e9).latency_ms == 1e9
+    with pytest.raises(ValidationError):
+        Metrics(latency_ms=1e9 + 1)
 
 
 def test_metrics_extra_forbidden_and_frozen():

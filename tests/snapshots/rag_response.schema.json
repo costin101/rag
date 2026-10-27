@@ -33,6 +33,7 @@
       "additionalProperties": false,
       "properties": {
         "latency_ms": {
+          "maximum": 1000000000,
           "minimum": 0,
           "title": "Latency Ms",
           "type": "number"
@@ -86,11 +87,13 @@
       "additionalProperties": false,
       "properties": {
         "input_tokens": {
+          "maximum": 1000000000000,
           "minimum": 0,
           "title": "Input Tokens",
           "type": "integer"
         },
         "output_tokens": {
+          "maximum": 1000000000000,
           "minimum": 0,
           "title": "Output Tokens",
           "type": "integer"
