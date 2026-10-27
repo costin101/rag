@@ -1,1 +1,8 @@
 .claude/state/
+.env*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+.fastembed_cache/
+*.pyc

@@ -1,0 +1,30 @@
+name: ci
+
+# Never pull_request_target: PR code must not run with repo secrets or a write token.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Major-tag pins (not full SHAs); revisit with Dependabot/Renovate.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install (hash-locked)
+        run: pip install --require-hashes -r requirements-dev.lock
+      - name: Compile
+        run: python -m compileall -q .
+      - name: Test
+        run: pytest
+      - name: Audit runtime dependencies
+        run: pip-audit -r requirements.lock
