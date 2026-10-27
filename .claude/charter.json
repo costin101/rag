@@ -1,0 +1,164 @@
+{
+  "$comment": "Project charter — the ONLY binding between Forge and this project. Everything project-specific lives here or in the files it points to (CLAUDE.md constitution, zone canons). Commands, skills, agents and hooks read this at runtime and never hardcode any of it. Generated/refreshed by /forge:bind.",
+  "project": {
+    "name": "rag",
+    "description": "Hybrid local/API RAG service: ephemeral Nomad session containers with a configurable external LLM API fallback and a unified RAGResponse."
+  },
+  "github": {
+    "org": "costin101",
+    "repo": "costin101/rag",
+    "project_number": 6,
+    "project_url": "https://github.com/users/costin101/projects/6",
+    "board_columns": [
+      "Backlog",
+      "Design Review",
+      "In Progress",
+      "PR Review",
+      "Done"
+    ],
+    "plan_of_record": "Epics (type:epic) decomposed into Features and Stories in the GitHub Project; NOW/NEXT/BACKLOG sequence set by /forge:scope"
+  },
+  "people": {
+    "tech_lead": {
+      "name": "Costin",
+      "github": "costin101",
+      "email": "costin.vieru@gmail.com",
+      "alt_emails": [
+        "costinvieru@gmail.com"
+      ]
+    },
+    "solo_dev": true
+  },
+  "process": {
+    "design_gate_label": "design:approved",
+    "adhoc_label": "adhoc",
+    "issue_close_exception_label": "close:exception",
+    "human_only_labels": [
+      "design:approved",
+      "close:exception"
+    ],
+    "human_only_commands": [
+      "/constitution",
+      "/release"
+    ],
+    "pr_review_column": "PR Review",
+    "design_review_column": "Design Review",
+    "label_vocabulary": {
+      "$comment": "The REAL label set — triage never invents labels outside this.",
+      "area": [
+        "area:rag"
+      ],
+      "type": [
+        "type:feature",
+        "type:chore",
+        "type:epic",
+        "type:story"
+      ],
+      "other": [
+        "bug",
+        "security",
+        "performance",
+        "close:exception",
+        "change-request",
+        "needs-scoping"
+      ]
+    },
+    "stale_after_days": {
+      "in_progress": 3,
+      "pr_review": 2
+    },
+    "stop_max_blocks": 2,
+    "standing_approvals": [],
+    "check_timeout": 120,
+    "check_debounce": 10,
+    "checklist_cache_ttl": 120,
+    "consult_policy": {
+      "$comment": "When the expensive consults run. Without thresholds every feature convenes the whole panel (mostly opus) — that is how consult verdicts stop being read.",
+      "min_zones_for_architect": 2,
+      "always_consult": [
+        "product-manager"
+      ],
+      "adversarial": {
+        "$comment": "Context-free challengers: contrarian on designs, red-team on diffs. Dispatched with a written brief path and nothing else (adversarial-consult skill).",
+        "min_stakes": "medium",
+        "design_agent": "contrarian",
+        "diff_agent": "red-team"
+      },
+      "web_specialists": {
+        "ux": false,
+        "seo": false
+      }
+    }
+  },
+  "git": {
+    "default_branch": "main",
+    "protected_branches": [
+      "main"
+    ],
+    "release_model": "trunk",
+    "branch_conventions": [
+      "feature/<issue>-<slug>",
+      "fix/<issue>-<slug>",
+      "hotfix/<issue>-<slug>",
+      "release/vX.Y.Z",
+      "chore/constitution-<date>"
+    ],
+    "branch_regex": "^(feature|fix|hotfix)/[0-9]+-[a-z0-9-]+$|^release/v[0-9]+\\.[0-9]+\\.[0-9]+$|^chore/constitution-[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+    "constitution_branch_prefix": "chore/constitution",
+    "commit": {
+      "$comment": "Optional 'types' overrides the conventional-commit type enum enforced by guard-commit; omit for the standard set.",
+      "convention": "conventional",
+      "subject_case": "lower",
+      "max_header": 100,
+      "forbid_trailers": [
+        "Co-Authored-By"
+      ]
+    }
+  },
+  "constitution": {
+    "$comment": "Where the architecture rules live. The architect and reviewer read these; /constitution amends them with evidence.",
+    "root": "CLAUDE.md",
+    "guardrails_skill": ".claude/skills/architecture-guardrails/SKILL.md",
+    "adr_dir": "docs/architecture"
+  },
+  "zones": [
+    {
+      "name": "rag",
+      "root": ".",
+      "match": "\\.py$|^Dockerfile$|^tests/",
+      "canon": "CLAUDE.md",
+      "stack": "python",
+      "tdd": true,
+      "check": "python3 -m compileall -q ."
+    }
+  ],
+  "models": {
+    "$comment": "AI model routing profiles: 'tiered' (balanced cost-performance) or 'full-brain' (all roles on Claude Opus).",
+    "profile": "tiered",
+    "default": "claude-sonnet-latest",
+    "tiers": {
+      "reasoning": "claude-opus-latest",
+      "coding": "claude-sonnet-latest",
+      "fast": "claude-haiku-latest"
+    },
+    "roles": {
+      "architect": "reasoning",
+      "security-expert": "reasoning",
+      "product-manager": "reasoning",
+      "contrarian": "reasoning",
+      "red-team": "reasoning",
+      "reviewer": "reasoning",
+      "developer": "coding",
+      "db-admin": "coding",
+      "tester": "coding",
+      "project-manager": "fast",
+      "pattern-recognizer": "fast"
+    }
+  },
+  "sandbox": {
+    "$comment": "Execution sandboxing: 'smart' (adaptive risk-based isolation), 'strict' (full container), 'native' (macOS seatbelt/Linux bwrap), or 'off'.",
+    "mode": "smart",
+    "timeout_seconds": 60
+  },
+  "schema_version": 1
+}
