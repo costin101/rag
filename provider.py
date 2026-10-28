@@ -29,10 +29,6 @@ from normalizer import (
 if TYPE_CHECKING:
     import httpx2
 
-# Transport retries are an SDK detail; 2 matches the SDK default but is stated here so a
-# change of SDK default cannot silently change how long a request may take.
-DEFAULT_MAX_RETRIES = 2
-
 # Only a finished turn is an answer; truncation, refusal and pause_turn are not.
 _COMPLETE_STOPS = frozenset({"end_turn", "stop_sequence"})
 
@@ -99,10 +95,13 @@ class AnthropicProvider:
         settings: Settings,
         *,
         http_client: "httpx2.Client | None" = None,
-        max_retries: int = DEFAULT_MAX_RETRIES,
+        max_retries: int | None = None,
     ):
         self._model = settings.RAG_MODEL
         self._max_tokens = settings.RAG_MAX_TOKENS
+        # An explicit argument (tests) wins; otherwise config decides, never the SDK default.
+        if max_retries is None:
+            max_retries = settings.RAG_PROVIDER_MAX_RETRIES
         with _without_ambient_anthropic_env():
             self._client = anthropic.Anthropic(
                 api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),

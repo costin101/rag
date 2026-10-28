@@ -16,7 +16,7 @@ from normalizer import (
     ProviderPayloadError,
     RAGError,
 )
-from provider import DEFAULT_MAX_RETRIES, AnthropicProvider, Provider, build_provider
+from provider import AnthropicProvider, Provider, build_provider
 
 API_KEY = "test-not-a-key-LEAK-anthropic"
 
@@ -120,9 +120,19 @@ def test_request_sends_no_tools():
     assert "tool_choice" not in rec.sent
 
 
-def test_default_max_retries_is_explicit():
-    p = AnthropicProvider(settings())
-    assert p._client.max_retries == DEFAULT_MAX_RETRIES == 2
+def test_max_retries_comes_from_settings():
+    assert AnthropicProvider(settings())._client.max_retries == 2
+    assert AnthropicProvider(settings(RAG_PROVIDER_MAX_RETRIES="5"))._client.max_retries == 5
+
+
+def test_build_provider_passes_the_configured_retries():
+    p = build_provider(settings(RAG_PROVIDER_MAX_RETRIES="3"))
+    assert p._client.max_retries == 3
+
+
+def test_explicit_max_retries_overrides_settings():
+    p = AnthropicProvider(settings(RAG_PROVIDER_MAX_RETRIES="3"), max_retries=0)
+    assert p._client.max_retries == 0
 
 
 def test_instructions_in_system_and_chunks_in_the_user_turn():

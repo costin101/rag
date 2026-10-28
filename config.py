@@ -55,6 +55,7 @@ class Settings(BaseModel):
     RAG_MODEL: TextField = "claude-sonnet-5-5"
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
     RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30.0
+    RAG_PROVIDER_MAX_RETRIES: StrictInt = Field(default=2, ge=0, le=10)
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
     QDRANT_API_KEY: SecretStr | None = None
@@ -67,7 +68,7 @@ class Settings(BaseModel):
     RAG_EMBED_REVISION: TextField = Field(default=None, validate_default=True)
     RAG_EMBED_CACHE_DIR: Path | None = None
 
-    @field_validator("RAG_MAX_TOKENS", "RAG_TOP_K", mode="before")
+    @field_validator("RAG_MAX_TOKENS", "RAG_PROVIDER_MAX_RETRIES", "RAG_TOP_K", mode="before")
     @classmethod
     def _whole_number(cls, value):
         if isinstance(value, str):

@@ -42,6 +42,7 @@ def test_minimal_env_applies_defaults():
     assert s.RAG_MODEL == "claude-sonnet-5-5"
     assert s.RAG_MAX_TOKENS == 1024
     assert s.RAG_PROVIDER_TIMEOUT_S == 30
+    assert s.RAG_PROVIDER_MAX_RETRIES == 2
     assert s.QDRANT_TIMEOUT_S == 10
     assert s.RAG_TOP_K == 5
     assert s.RAG_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
@@ -61,6 +62,7 @@ def test_all_fields_overridable():
             RAG_MODEL="other-model",
             RAG_MAX_TOKENS="256",
             RAG_PROVIDER_TIMEOUT_S="2.5",
+            RAG_PROVIDER_MAX_RETRIES="4",
             QDRANT_TIMEOUT_S="1.5",
             RAG_TOP_K="7",
             RAG_EMBED_MODEL="some/embedder",
@@ -72,6 +74,7 @@ def test_all_fields_overridable():
     assert s.RAG_MODEL == "other-model"
     assert s.RAG_MAX_TOKENS == 256
     assert s.RAG_PROVIDER_TIMEOUT_S == 2.5
+    assert s.RAG_PROVIDER_MAX_RETRIES == 4
     assert s.QDRANT_TIMEOUT_S == 1.5
     assert s.RAG_TOP_K == 7
     assert s.RAG_EMBED_MODEL == "some/embedder"
@@ -168,6 +171,17 @@ def test_top_k_bounds_inclusive(good):
 @pytest.mark.parametrize("bad", ["0", "-5", "abc", "1.5", "1_0", "1_000", "200001", "99999999999"])
 def test_invalid_positive_int(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
+
+
+@pytest.mark.parametrize("bad", ["-1", "abc", "1.5", "1_0", "+5", "11", "true", "１", "99999999999"])
+def test_invalid_max_retries(bad):
+    assert "RAG_PROVIDER_MAX_RETRIES" in str(error_for(valid_env(RAG_PROVIDER_MAX_RETRIES=bad)))
+
+
+@pytest.mark.parametrize("good", ["0", "10"])
+def test_max_retries_bounds_inclusive(good):
+    s = load_settings(valid_env(RAG_PROVIDER_MAX_RETRIES=good))
+    assert s.RAG_PROVIDER_MAX_RETRIES == int(good)
 
 
 @pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
@@ -323,6 +337,7 @@ def test_bad_url_never_echoed_anywhere_in_traceback(url):
         ("QDRANT_URL", "ftp://LEAK-host"),
         ("RAG_TOP_K", "LEAK"),
         ("RAG_MAX_TOKENS", "LEAK"),
+        ("RAG_PROVIDER_MAX_RETRIES", "LEAK"),
         ("RAG_PROVIDER_TIMEOUT_S", "LEAK"),
         ("QDRANT_TIMEOUT_S", "LEAK"),
         ("RAG_PROVIDER", "LEAK"),
@@ -503,6 +518,8 @@ DIRECT = {
         ("RAG_TOP_K", 2.0),
         ("RAG_MAX_TOKENS", True),
         ("RAG_MAX_TOKENS", 2.0),
+        ("RAG_PROVIDER_MAX_RETRIES", True),
+        ("RAG_PROVIDER_MAX_RETRIES", 2.0),
         ("RAG_PROVIDER_TIMEOUT_S", True),
         ("QDRANT_TIMEOUT_S", True),
         ("QDRANT_TIMEOUT_S", False),
