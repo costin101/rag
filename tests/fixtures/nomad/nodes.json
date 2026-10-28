@@ -1,0 +1,76 @@
+{
+ "body": [
+  {
+   "Address": "127.0.0.1",
+   "CreateIndex": 8,
+   "Datacenter": "dc1",
+   "Drain": false,
+   "Drivers": {
+    "docker": {
+     "Attributes": {
+      "driver.docker": "true",
+      "driver.docker.bridge_ip": "172.17.0.1",
+      "driver.docker.os_type": "linux",
+      "driver.docker.runtimes": "io.containerd.runc.v2,runc",
+      "driver.docker.version": "28.0.4"
+     },
+     "Detected": true,
+     "HealthDescription": "Healthy",
+     "Healthy": true,
+     "UpdateTime": "2026-10-28T23:58:32.050249296Z"
+    },
+    "exec": {
+     "Attributes": {
+      "driver.exec": "true"
+     },
+     "Detected": true,
+     "HealthDescription": "Healthy",
+     "Healthy": true,
+     "UpdateTime": "2026-10-28T23:58:32.037160811Z"
+    },
+    "java": {
+     "Attributes": {
+      "driver.java": "true",
+      "driver.java.runtime": "OpenJDK Runtime Environment Temurin-17.0.21+9 (build 17.0.21+9)",
+      "driver.java.version": "17.0.21",
+      "driver.java.vm": "OpenJDK 64-Bit Server VM Temurin-17.0.21+9 (build 17.0.21+9, mixed mode, sharing)"
+     },
+     "Detected": true,
+     "HealthDescription": "Healthy",
+     "Healthy": true,
+     "UpdateTime": "2026-10-28T23:58:33.181364596Z"
+    },
+    "qemu": {
+     "Attributes": {},
+     "Detected": false,
+     "HealthDescription": "",
+     "Healthy": false,
+     "UpdateTime": "2026-10-28T23:58:32.039782956Z"
+    },
+    "raw_exec": {
+     "Attributes": {
+      "driver.raw_exec": "true"
+     },
+     "Detected": true,
+     "HealthDescription": "Healthy",
+     "Healthy": true,
+     "UpdateTime": "2026-10-28T23:58:32.037696154Z"
+    }
+   },
+   "HostVolumes": {},
+   "ID": "3f2820a3-b55d-1fec-8618-7f4f2e5b38f7",
+   "LastDrain": null,
+   "ModifyIndex": 10,
+   "Name": "runnervm48cm3",
+   "NodeClass": "",
+   "NodePool": "default",
+   "SchedulingEligibility": "eligible",
+   "Status": "ready",
+   "StatusDescription": "",
+   "Version": "2.0.7"
+  }
+ ],
+ "method": "GET",
+ "path": "/v1/nodes",
+ "status": 200
+}

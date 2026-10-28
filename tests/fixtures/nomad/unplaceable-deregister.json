@@ -1,0 +1,16 @@
+{
+ "body": {
+  "EvalCreateIndex": 39,
+  "EvalID": "dd4c584c-e1b3-0310-219d-13807c3d815a",
+  "Index": 39,
+  "JobModifyIndex": 39,
+  "KnownLeader": false,
+  "LastContact": 0,
+  "NextToken": "",
+  "VolumeEvalID": "",
+  "VolumeEvalIndex": 0
+ },
+ "method": "DELETE",
+ "path": "/v1/job/rag-spike-unplaceable-30001d97?purge=true",
+ "status": 200
+}

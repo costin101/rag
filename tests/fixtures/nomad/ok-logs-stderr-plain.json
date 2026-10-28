@@ -1,0 +1,8 @@
+{
+ "body": {
+  "_raw_text": "spike stderr line\n"
+ },
+ "method": "GET",
+ "path": "/v1/client/fs/logs/38f571c2-36f3-c1de-b4a4-c479a4456745?task=gen&type=stderr&plain=true",
+ "status": 200
+}

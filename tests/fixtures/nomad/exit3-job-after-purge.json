@@ -1,0 +1,8 @@
+{
+ "body": {
+  "_raw_text": "job not found"
+ },
+ "method": "GET",
+ "path": "/v1/job/rag-spike-exit3-64aa7544",
+ "status": 404
+}

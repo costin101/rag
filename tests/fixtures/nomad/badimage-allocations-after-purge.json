@@ -1,0 +1,6 @@
+{
+ "body": [],
+ "method": "GET",
+ "path": "/v1/job/rag-spike-badimage-83b7dfb5/allocations",
+ "status": 200
+}

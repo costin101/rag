@@ -1,0 +1,16 @@
+{
+ "body": {
+  "EvalCreateIndex": 17,
+  "EvalID": "e7d5f4cd-d5a8-dbba-05f1-a11dbdec8683",
+  "Index": 17,
+  "JobModifyIndex": 17,
+  "KnownLeader": false,
+  "LastContact": 0,
+  "NextToken": "",
+  "VolumeEvalID": "",
+  "VolumeEvalIndex": 0
+ },
+ "method": "DELETE",
+ "path": "/v1/job/rag-spike-ok-736411a3?purge=true",
+ "status": 200
+}

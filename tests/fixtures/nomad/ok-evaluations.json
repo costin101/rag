@@ -1,0 +1,44 @@
+{
+ "body": [
+  {
+   "CreateIndex": 11,
+   "CreateTime": 1793231915811918090,
+   "ID": "5bc03cb4-7575-7428-7080-2bb919f0486e",
+   "JobID": "rag-spike-ok-736411a3",
+   "JobModifyIndex": 11,
+   "ModifyIndex": 13,
+   "ModifyTime": 1793231915814622760,
+   "Namespace": "default",
+   "PlanAnnotations": {
+    "DesiredTGUpdates": {
+     "g": {
+      "Canary": 0,
+      "DestructiveUpdate": 0,
+      "Disconnect": 0,
+      "Ignore": 0,
+      "InPlaceUpdate": 0,
+      "Migrate": 0,
+      "Place": 1,
+      "Preemptions": 0,
+      "Reconnect": 0,
+      "RescheduleLater": 0,
+      "RescheduleNow": 0,
+      "Stop": 0
+     }
+    },
+    "PreemptedAllocs": null
+   },
+   "Priority": 50,
+   "QueuedAllocations": {
+    "g": 0
+   },
+   "SnapshotIndex": 11,
+   "Status": "complete",
+   "TriggeredBy": "job-register",
+   "Type": "batch"
+  }
+ ],
+ "method": "GET",
+ "path": "/v1/job/rag-spike-ok-736411a3/evaluations",
+ "status": 200
+}

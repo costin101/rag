@@ -1,0 +1,16 @@
+{
+ "body": {
+  "EvalCreateIndex": 33,
+  "EvalID": "d29cbc14-8fd7-23f5-2bb2-c700585bc423",
+  "Index": 33,
+  "JobModifyIndex": 33,
+  "KnownLeader": false,
+  "LastContact": 0,
+  "NextToken": "",
+  "VolumeEvalID": "",
+  "VolumeEvalIndex": 0
+ },
+ "method": "DELETE",
+ "path": "/v1/job/rag-spike-badimage-83b7dfb5?purge=true",
+ "status": 200
+}

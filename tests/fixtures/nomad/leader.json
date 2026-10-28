@@ -1,0 +1,6 @@
+{
+ "body": "127.0.0.1:4647",
+ "method": "GET",
+ "path": "/v1/status/leader",
+ "status": 200
+}

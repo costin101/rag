@@ -1,0 +1,8 @@
+{
+ "body": {
+  "_raw_text": "task \"gen\" not started yet. No logs available"
+ },
+ "method": "GET",
+ "path": "/v1/client/fs/logs/7f68363d-bacb-53f1-3769-bae4ddb10f26?task=gen&type=stderr",
+ "status": 404
+}
