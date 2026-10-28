@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 .fastembed_cache/
 *.pyc
+.embed-cache/

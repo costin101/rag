@@ -42,6 +42,8 @@ def test_minimal_env_applies_defaults():
     assert s.RAG_MODEL == "claude-sonnet-5-5"
     assert s.RAG_MAX_TOKENS == 1024
     assert s.RAG_PROVIDER_TIMEOUT_S == 30
+    assert s.RAG_PROVIDER_MAX_RETRIES == 2
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == 60
     assert s.QDRANT_TIMEOUT_S == 10
     assert s.RAG_TOP_K == 5
     assert s.RAG_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
@@ -61,6 +63,8 @@ def test_all_fields_overridable():
             RAG_MODEL="other-model",
             RAG_MAX_TOKENS="256",
             RAG_PROVIDER_TIMEOUT_S="2.5",
+            RAG_PROVIDER_MAX_RETRIES="4",
+            RAG_PROVIDER_MAX_RETRY_WAIT_S="7.5",
             QDRANT_TIMEOUT_S="1.5",
             RAG_TOP_K="7",
             RAG_EMBED_MODEL="some/embedder",
@@ -72,6 +76,8 @@ def test_all_fields_overridable():
     assert s.RAG_MODEL == "other-model"
     assert s.RAG_MAX_TOKENS == 256
     assert s.RAG_PROVIDER_TIMEOUT_S == 2.5
+    assert s.RAG_PROVIDER_MAX_RETRIES == 4
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == 7.5
     assert s.QDRANT_TIMEOUT_S == 1.5
     assert s.RAG_TOP_K == 7
     assert s.RAG_EMBED_MODEL == "some/embedder"
@@ -170,7 +176,20 @@ def test_invalid_positive_int(name, bad):
     assert name in str(error_for(valid_env(**{name: bad})))
 
 
-@pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
+@pytest.mark.parametrize("bad", ["-1", "abc", "1.5", "1_0", "+5", "11", "true", "１", "99999999999"])
+def test_invalid_max_retries(bad):
+    assert "RAG_PROVIDER_MAX_RETRIES" in str(error_for(valid_env(RAG_PROVIDER_MAX_RETRIES=bad)))
+
+
+@pytest.mark.parametrize("good", ["0", "10"])
+def test_max_retries_bounds_inclusive(good):
+    s = load_settings(valid_env(RAG_PROVIDER_MAX_RETRIES=good))
+    assert s.RAG_PROVIDER_MAX_RETRIES == int(good)
+
+
+@pytest.mark.parametrize(
+    "name", ["RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S"]
+)
 @pytest.mark.parametrize(
     "bad",
     ["0", "-1", "abc", "nan", "inf", "-inf", "1_0", "1_0.5", "1e3", "1e0", "1e-1", "+5", "5.", ".5", "601"],
@@ -323,7 +342,9 @@ def test_bad_url_never_echoed_anywhere_in_traceback(url):
         ("QDRANT_URL", "ftp://LEAK-host"),
         ("RAG_TOP_K", "LEAK"),
         ("RAG_MAX_TOKENS", "LEAK"),
+        ("RAG_PROVIDER_MAX_RETRIES", "LEAK"),
         ("RAG_PROVIDER_TIMEOUT_S", "LEAK"),
+        ("RAG_PROVIDER_MAX_RETRY_WAIT_S", "LEAK"),
         ("QDRANT_TIMEOUT_S", "LEAK"),
         ("RAG_PROVIDER", "LEAK"),
         ("RAG_EMBED_CACHE_DIR", "LEAK\x00"),
@@ -409,6 +430,12 @@ def test_plain_decimal_timeouts_accepted(good):
     assert load_settings(valid_env(QDRANT_TIMEOUT_S=good)).QDRANT_TIMEOUT_S == float(good)
 
 
+@pytest.mark.parametrize("good", ["0.5", "2", "30.25"])
+def test_plain_decimal_retry_wait_accepted(good):
+    s = load_settings(valid_env(RAG_PROVIDER_MAX_RETRY_WAIT_S=good))
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == float(good)
+
+
 # --- upper bounds ------------------------------------------------------------
 
 
@@ -416,7 +443,9 @@ def test_max_tokens_upper_bound_inclusive():
     assert load_settings(valid_env(RAG_MAX_TOKENS="200000")).RAG_MAX_TOKENS == 200000
 
 
-@pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
+@pytest.mark.parametrize(
+    "name", ["RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S"]
+)
 def test_timeout_upper_bound_inclusive(name):
     assert getattr(load_settings(valid_env(**{name: "600"})), name) == 600
     assert name in str(error_for(valid_env(**{name: "600.01"})))
@@ -503,7 +532,10 @@ DIRECT = {
         ("RAG_TOP_K", 2.0),
         ("RAG_MAX_TOKENS", True),
         ("RAG_MAX_TOKENS", 2.0),
+        ("RAG_PROVIDER_MAX_RETRIES", True),
+        ("RAG_PROVIDER_MAX_RETRIES", 2.0),
         ("RAG_PROVIDER_TIMEOUT_S", True),
+        ("RAG_PROVIDER_MAX_RETRY_WAIT_S", True),
         ("QDRANT_TIMEOUT_S", True),
         ("QDRANT_TIMEOUT_S", False),
     ],
@@ -589,6 +621,7 @@ def test_settings_reject_unknown_fields_on_direct_construction():
 def test_timeout_defaults_are_floats():
     s = load_settings(valid_env())
     assert isinstance(s.RAG_PROVIDER_TIMEOUT_S, float)
+    assert isinstance(s.RAG_PROVIDER_MAX_RETRY_WAIT_S, float)
     assert isinstance(s.QDRANT_TIMEOUT_S, float)
 
 
@@ -609,3 +642,74 @@ def test_bad_qdrant_key_and_plain_http_url_are_reported_together():
     err = error_for(valid_env(QDRANT_URL="http://h.example.com", QDRANT_API_KEY="bad key"))
     assert "QDRANT_API_KEY" in str(err)
     assert "QDRANT_URL: must be https when QDRANT_API_KEY is set" in str(err)
+
+
+# --- embed endpoint (red team: ambient HF_ENDPOINT must not pick the download host) ---
+
+
+def test_embed_endpoint_defaults_to_the_public_hub():
+    assert load_settings(valid_env()).RAG_EMBED_ENDPOINT == "https://huggingface.co"
+
+
+def test_embed_endpoint_can_be_overridden_with_https():
+    s = load_settings(valid_env(RAG_EMBED_ENDPOINT="https://hub.example.com"))
+    assert s.RAG_EMBED_ENDPOINT == "https://hub.example.com"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://hub.example.com",
+        "ftp://hub.example.com",
+        "hub.example.com",
+        "https://TOKEN@hub.example.com",
+        "https://hub.example.com/?k=v",
+        "https://hub.example.com#frag",
+        "https://hub.example.com:abc",
+        "https://hub​.example.com",
+    ],
+)
+def test_invalid_embed_endpoint(bad):
+    err = error_for(valid_env(RAG_EMBED_ENDPOINT=bad))
+    assert "RAG_EMBED_ENDPOINT" in str(err)
+    assert "TOKEN" not in f"{err} {full_trace(err)}"
+
+
+def test_embed_endpoint_must_be_https_case_insensitively():
+    s = load_settings(valid_env(RAG_EMBED_ENDPOINT="HTTPS://hub.example.com"))
+    assert s.RAG_EMBED_ENDPOINT == "HTTPS://hub.example.com"
+
+
+# --- provider base URL (red team: ambient ANTHROPIC_BASE_URL must not pick the key's host) ---
+
+
+def test_provider_base_url_defaults_to_the_public_api():
+    assert load_settings(valid_env()).RAG_PROVIDER_BASE_URL == "https://api.anthropic.com"
+
+
+def test_provider_base_url_can_be_overridden_with_https():
+    s = load_settings(valid_env(RAG_PROVIDER_BASE_URL="https://gateway.example.com/anthropic"))
+    assert s.RAG_PROVIDER_BASE_URL == "https://gateway.example.com/anthropic"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://gateway.example.com",
+        "ftp://gateway.example.com",
+        "gateway.example.com",
+        "https://TOKEN@gateway.example.com",
+        "https://gateway.example.com/?k=v",
+        "https://gateway.example.com#frag",
+        "https://gateway.example.com:abc",
+    ],
+)
+def test_invalid_provider_base_url(bad):
+    err = error_for(valid_env(RAG_PROVIDER_BASE_URL=bad))
+    assert "RAG_PROVIDER_BASE_URL" in str(err)
+    assert "TOKEN" not in f"{err} {full_trace(err)}"
+
+
+def test_provider_base_url_must_be_https_case_insensitively():
+    s = load_settings(valid_env(RAG_PROVIDER_BASE_URL="HTTPS://gateway.example.com"))
+    assert s.RAG_PROVIDER_BASE_URL == "HTTPS://gateway.example.com"

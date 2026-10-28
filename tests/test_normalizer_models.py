@@ -32,7 +32,7 @@ def response(**kw):
     data = {
         "answer": "an answer",
         "chunks": [chunk()],
-        "sources": [{"id": "s1", "title": "Doc", "uri": "https://example.com/doc"}],
+        "sources": [{"id": "s1"}],
         "usage": {"input_tokens": 3, "output_tokens": 4},
         "metrics": {"latency_ms": 12.5},
     }
@@ -181,67 +181,21 @@ def test_chunk_required_fields(missing):
 # --- Source ------------------------------------------------------------------
 
 
-def test_source_optional_fields_default_to_none():
-    s = Source(id="s1")
-    assert s.title is None and s.uri is None
+def test_source_is_only_an_id():
+    assert Source(id="s1").model_dump() == {"id": "s1"}
 
 
-@pytest.mark.parametrize("uri", ["http://example.com/a", "https://example.com/a?q=1"])
-def test_source_keeps_http_uris(uri):
-    assert Source(id="s1", uri=uri).uri == uri
-
-
-@pytest.mark.parametrize(
-    "uri",
-    [
-        "javascript:alert(1)",
-        "file:///etc/passwd",
-        "ftp://example.com/x",
-        "data:text/html,hi",
-        "example.com/path",
-        "/relative/path",
-        "https://",
-        "http:///nohost",
-        "",
-    ],
-)
-def test_source_coerces_other_uris_to_none(uri):
-    assert Source(id="s1", title="t", uri=uri).uri is None
-
-
-@pytest.mark.parametrize(
-    "uri",
-    [
-        "https://LEAKTOKEN@example.com/a",
-        "https://user:LEAKPW@example.com/a",
-        "https://@example.com/a",
-        "https://example.com:abc/a",
-        "https://example.com:99999/a",
-        "https://example.com:0/a",
-        "https://exa mple.com/a",
-        "https://example.com/a b",
-        "https://example.com/a\nb",
-    ],
-)
-def test_source_coerces_userinfo_bad_ports_and_whitespace_to_none(uri):
-    assert Source(id="s1", uri=uri).uri is None
-
-
-def test_source_keeps_query_fragment_and_port():
-    uri = "https://example.com:8443/a?q=1#top"
-    assert Source(id="s1", uri=uri).uri == uri
-
-
-def test_source_non_string_uri_rejected():
+@pytest.mark.parametrize("field", ["title", "uri"])
+def test_source_rejects_dropped_title_and_uri(field):
     with pytest.raises(ValidationError):
-        Source(id="s1", uri=5)
+        Source(id="s1", **{field: "https://example.com/a"})
 
 
 def test_source_extra_forbidden_and_frozen():
     with pytest.raises(ValidationError):
         Source(id="s1", url="https://example.com")
     with pytest.raises(ValidationError):
-        Source(id="s1").title = "x"
+        Source(id="s1").id = "x"
 
 
 # --- Usage -------------------------------------------------------------------
@@ -373,10 +327,11 @@ def test_base_error_takes_explicit_code():
 
 EXPECTED_FIELDS = {
     "ContextChunk": {"id", "text", "score", "source_id"},
-    "Source": {"id", "title", "uri"},
+    "Source": {"id"},
     "Usage": {"input_tokens", "output_tokens"},
     "Metrics": {"latency_ms"},
     "RAGResponse": {"answer", "chunks", "sources", "usage", "metrics"},
+    "Generation": {"text", "input_tokens", "output_tokens"},
 }
 
 
@@ -428,7 +383,7 @@ def test_every_model_forbids_extras_is_frozen_and_hides_input():
         lambda m: ContextChunk(**chunk(score=m)),
         lambda m: Usage(input_tokens=m, output_tokens=1),
         lambda m: Metrics(latency_ms=m),
-        lambda m: Source(id=m, uri=5),
+        lambda m: Source(id=5, title=m),
         lambda m: RAGResponse.model_validate(response(answer=m, usage=m)),
     ],
 )

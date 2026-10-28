@@ -12,6 +12,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Real vector store for the integration lane (tests/test_integration_retrieval.py).
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 6333:6333
     steps:
       # Major-tag pins (not full SHAs); revisit with Dependabot/Renovate.
       - uses: actions/checkout@v7
@@ -24,7 +30,31 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.lock
       - name: Compile
         run: python -m compileall -q .
+      # The pinned embedding model downloads once, then restores from the cache. The key tracks
+      # the lockfile (fastembed's cache layout) and the default model and pinned revision, so a
+      # config edit that leaves them alone keeps the cache.
+      - name: Embedding cache key
+        id: embed
+        run: |
+          python -c "from config import DEFAULT_EMBED_MODEL as m, DEFAULT_EMBED_REVISION as r; print(f'key={m.replace(chr(47), chr(45))}-{r}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.embed-cache
+          key: embed-${{ hashFiles('requirements.lock') }}-${{ steps.embed.outputs.key }}
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            python -c "import urllib.request as u; u.urlopen('http://localhost:6333/readyz', timeout=2)" && exit 0
+            sleep 2
+          done
+          echo "Qdrant did not become ready" >&2
+          exit 1
       - name: Test
+        # RAG_REQUIRE_INTEGRATION=1: a missing Qdrant fails the build instead of skipping the lane.
         run: pytest
+        env:
+          QDRANT_URL: http://localhost:6333
+          RAG_REQUIRE_INTEGRATION: "1"
+          RAG_EMBED_CACHE_DIR: ${{ github.workspace }}/.embed-cache
       - name: Audit runtime dependencies
         run: pip-audit -r requirements.lock

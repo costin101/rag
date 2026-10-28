@@ -45,6 +45,10 @@ TextField = Annotated[str, Field(min_length=1)]
 # pinned commit is that repo's. A different RAG_EMBED_MODEL must name its own revision.
 DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBED_REVISION = "aa8f8b060edb00e03bfdd08813a2949946c8ba55"
+# Passed explicitly to the download so the ambient HF_ENDPOINT never picks the host.
+DEFAULT_EMBED_ENDPOINT = "https://huggingface.co"
+# Passed explicitly to the SDK so the ambient ANTHROPIC_BASE_URL never picks the key's host.
+DEFAULT_PROVIDER_BASE_URL = "https://api.anthropic.com"
 
 
 class Settings(BaseModel):
@@ -55,6 +59,10 @@ class Settings(BaseModel):
     RAG_MODEL: TextField = "claude-sonnet-5-5"
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
     RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30.0
+    RAG_PROVIDER_MAX_RETRIES: StrictInt = Field(default=2, ge=0, le=10)
+    # Longest the SDK may sleep before one retry, whatever Retry-After the server sends.
+    RAG_PROVIDER_MAX_RETRY_WAIT_S: TimeoutS = 60.0
+    RAG_PROVIDER_BASE_URL: str = DEFAULT_PROVIDER_BASE_URL
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
     QDRANT_API_KEY: SecretStr | None = None
@@ -66,8 +74,9 @@ class Settings(BaseModel):
     RAG_EMBED_MODEL: TextField = DEFAULT_EMBED_MODEL
     RAG_EMBED_REVISION: TextField = Field(default=None, validate_default=True)
     RAG_EMBED_CACHE_DIR: Path | None = None
+    RAG_EMBED_ENDPOINT: str = DEFAULT_EMBED_ENDPOINT
 
-    @field_validator("RAG_MAX_TOKENS", "RAG_TOP_K", mode="before")
+    @field_validator("RAG_MAX_TOKENS", "RAG_PROVIDER_MAX_RETRIES", "RAG_TOP_K", mode="before")
     @classmethod
     def _whole_number(cls, value):
         if isinstance(value, str):
@@ -76,7 +85,9 @@ class Settings(BaseModel):
             return int(value)
         return value
 
-    @field_validator("RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S", mode="before")
+    @field_validator(
+        "RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S", mode="before"
+    )
     @classmethod
     def _decimal_number(cls, value):
         if isinstance(value, str):
@@ -132,6 +143,16 @@ class Settings(BaseModel):
         if model != DEFAULT_EMBED_MODEL:
             raise ValueError("required when RAG_EMBED_MODEL is not the default model")
         return DEFAULT_EMBED_REVISION
+
+    @field_validator("RAG_PROVIDER_BASE_URL", "RAG_EMBED_ENDPOINT")
+    @classmethod
+    def _https_endpoint(cls, url: str) -> str:
+        problem = url_problem(url, allow_query=False)
+        if problem:
+            raise ValueError(problem)
+        if not url.lower().startswith("https://"):
+            raise ValueError("must be an https URL")
+        return url
 
     @field_validator("QDRANT_URL")
     @classmethod

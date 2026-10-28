@@ -1,10 +1,10 @@
 """The single caller-visible response contract (rule 1) and the public error set.
 
-Path adapters (generation -> RAGResponse) are added here by later stories; vendor
-payload formats never live in this module.
+Path adapters (generation -> RAGResponse) live here; vendor payload formats never do.
 """
 
 import unicodedata
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -60,15 +60,6 @@ class ContextChunk(_Model):
 
 class Source(_Model):
     id: str
-    title: str | None = None
-    uri: str | None = None
-
-    @field_validator("uri")
-    @classmethod
-    def _http_uri_only(cls, uri: str | None) -> str | None:
-        if uri is None:
-            return None
-        return None if url_problem(uri, allow_query=True) else uri
 
 
 class Usage(_Model):
@@ -95,6 +86,11 @@ def _invisible(char: str) -> bool:
     )
 
 
+def is_blank(text: str) -> bool:
+    """True if `text` has no visible character (empty, whitespace, invisible or filler only)."""
+    return all(_invisible(c) for c in text)
+
+
 class RAGResponse(_Model):
     answer: str
     # frozen=True blocks attribute assignment only; the lists themselves stay mutable.
@@ -106,7 +102,7 @@ class RAGResponse(_Model):
     @field_validator("answer")
     @classmethod
     def _answer_not_blank(cls, answer: str) -> str:
-        if all(_invisible(c) for c in answer):
+        if is_blank(answer):
             raise ValueError("answer must not be blank")
         return answer
 
@@ -162,3 +158,38 @@ class ProviderError(RAGError):
 class ProviderPayloadError(RAGError):
     def __init__(self, message: str):
         super().__init__(ErrorCode.PROVIDER_PAYLOAD_INVALID, message)
+
+
+class Generation(_Model):
+    """Provider-neutral generation result: what any path hands to its adapter."""
+
+    text: str
+    input_tokens: TokenCount
+    output_tokens: TokenCount
+
+
+def from_generation(
+    generation: Generation, chunks: Sequence[ContextChunk], latency_ms: float
+) -> RAGResponse:
+    """Adapt a generation plus the chunks it was grounded on into the caller-visible response.
+
+    Sources are derived from the chunks' source_id, deduplicated in first-seen order; chunks
+    carry no title or uri, and a source is only its id. Zero chunks means the answer would
+    be ungrounded: that is an EmptyRetrievalError, never a response.
+    """
+    try:
+        if not chunks:
+            raise EmptyRetrievalError("no context chunks to ground the answer")
+        if is_blank(generation.text):
+            raise ProviderPayloadError("the provider returned a blank answer")
+        source_ids = dict.fromkeys(c.source_id for c in chunks)
+        return RAGResponse(
+            answer=generation.text,
+            chunks=list(chunks),
+            sources=[Source(id=source_id) for source_id in source_ids],
+            usage=Usage(input_tokens=generation.input_tokens, output_tokens=generation.output_tokens),
+            metrics=Metrics(latency_ms=latency_ms),
+        )
+    finally:
+        # Error trackers capture locals: the context and the generated text stay out of them.
+        generation = chunks = None
