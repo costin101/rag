@@ -244,6 +244,11 @@ def test_https_with_qdrant_api_key_accepted():
     assert s.QDRANT_API_KEY.get_secret_value() == QDRANT_KEY
 
 
+def test_https_required_even_when_host_contains_https():
+    err = error_for(valid_env(QDRANT_URL="http://https.internal:6333", QDRANT_API_KEY=QDRANT_KEY))
+    assert "QDRANT_URL: must be https when QDRANT_API_KEY is set" in str(err)
+
+
 def test_https_check_is_scheme_case_insensitive():
     s = load_settings(valid_env(QDRANT_URL="HTTPS://q.example.com", QDRANT_API_KEY=QDRANT_KEY))
     assert s.QDRANT_URL == "HTTPS://q.example.com"
@@ -528,3 +533,41 @@ def test_collection_rejects_path_unsafe_names(bad):
 @pytest.mark.parametrize("ok", ["docs", "my-docs_v2", "docs.v1", "Docs123"])
 def test_collection_accepts_plain_names(ok):
     assert load_settings(valid_env(QDRANT_COLLECTION=ok)).QDRANT_COLLECTION == ok
+
+
+# --- API keys: printable ASCII only ------------------------------------------
+
+NON_ASCII_CHARS = {
+    "left curly quote (Pi)": "\u201c",
+    "private use (Co)": "\ue000",
+    "lone surrogate (Cs)": "\udcff",
+    "cyrillic a": "\u0430",
+    "e acute": "\u00e9",
+}
+
+
+@pytest.mark.parametrize("key_name", KEY_NAMES)
+@pytest.mark.parametrize("char", NON_ASCII_CHARS.values(), ids=NON_ASCII_CHARS.keys())
+def test_api_key_with_non_ascii_character_rejected(key_name, char):
+    env = valid_env(QDRANT_URL="https://q.example.com", QDRANT_API_KEY="test-not-a-key-ok")
+    env[key_name] = f"LEAK{char}SECRET"
+    err = error_for(env)
+    assert f"{key_name}: must contain only printable ASCII characters" in str(err)
+    text = f"{err} {err!r} {full_trace(err)}"
+    assert "LEAK" not in text and "SECRET" not in text
+
+
+def test_settings_reject_unknown_fields_on_direct_construction():
+    with pytest.raises(ValidationError):
+        Settings(
+            ANTHROPIC_API_KEY=API_KEY,
+            QDRANT_URL="http://localhost:6333",
+            QDRANT_COLLECTION="docs",
+            QDRANT_APIKEY="typo",
+        )
+
+
+def test_timeout_defaults_are_floats():
+    s = load_settings(valid_env())
+    assert isinstance(s.RAG_PROVIDER_TIMEOUT_S, float)
+    assert isinstance(s.QDRANT_TIMEOUT_S, float)

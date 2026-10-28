@@ -25,6 +25,9 @@ from normalizer import ConfigError, has_hidden_chars, url_problem
 
 TimeoutS = Annotated[StrictFloat, Field(gt=0, le=600, allow_inf_nan=False)]
 
+# API keys travel in HTTP headers, so they must be printable ASCII.
+_ASCII_KEY = re.compile(r"[\x21-\x7e]+")
+
 # Env numbers are plain decimals only: no signs, underscores, exponents or non-ASCII digits.
 _WHOLE = re.compile(r"[0-9]{1,9}")
 _DECIMAL = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9})?")
@@ -35,9 +38,10 @@ _COLLECTION = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
 TextField = Annotated[str, Field(min_length=1)]
 
 # The default embedding model and its pinned Hugging Face commit (checked 2026-10-28).
-# A different RAG_EMBED_MODEL must name its own revision.
+# fastembed downloads this model from Qdrant/bge-small-en-v1.5-onnx-Q, not from BAAI, so the
+# pinned commit is that repo's. A different RAG_EMBED_MODEL must name its own revision.
 DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
-DEFAULT_EMBED_REVISION = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+DEFAULT_EMBED_REVISION = "aa8f8b060edb00e03bfdd08813a2949946c8ba55"
 
 
 class Settings(BaseModel):
@@ -47,13 +51,13 @@ class Settings(BaseModel):
     RAG_PROVIDER: Literal["anthropic"] = "anthropic"
     RAG_MODEL: TextField = "claude-sonnet-5-5"
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
-    RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30
+    RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30.0
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
     QDRANT_API_KEY: SecretStr | None = None
     QDRANT_URL: str
     QDRANT_COLLECTION: TextField
-    QDRANT_TIMEOUT_S: TimeoutS = 10
+    QDRANT_TIMEOUT_S: TimeoutS = 10.0
 
     RAG_TOP_K: StrictInt = Field(default=5, ge=1, le=50)
     RAG_EMBED_MODEL: TextField = DEFAULT_EMBED_MODEL
@@ -87,6 +91,8 @@ class Settings(BaseModel):
                 raise ValueError("must not be empty")
             if has_hidden_chars(raw):
                 raise ValueError("must not contain whitespace or control characters")
+            if not _ASCII_KEY.fullmatch(raw):
+                raise ValueError("must contain only printable ASCII characters")
         return value
 
     @field_validator("RAG_MODEL", "RAG_EMBED_MODEL", "RAG_EMBED_REVISION", "QDRANT_COLLECTION")
