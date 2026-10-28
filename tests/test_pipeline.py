@@ -191,6 +191,22 @@ def test_rag_errors_are_not_wrapped(side, error):
     assert rebuilt.__cause__ is None and rebuilt.__context__ is None
 
 
+class DetailedRetrievalError(RetrievalError):
+    """A component's own RAGError subclass whose constructor is not `(message)` (rule 5)."""
+
+    def __init__(self, message, detail):
+        super().__init__(message)
+        self.detail = detail
+
+
+def test_a_component_error_subclass_with_its_own_constructor_is_rebuilt_cleanly():
+    error = DetailedRetrievalError("store down", f"{SECRET} LEAK")
+    rebuilt = failure(StubRetriever(error=error), StubGenerator())
+    assert rebuilt is not error
+    assert (type(rebuilt), rebuilt.code, rebuilt.message) == (DetailedRetrievalError, error.code, error.message)
+    assert_clean(rebuilt)
+
+
 # --- anything else becomes the right RAGError, cleanly ---------------------------------
 
 

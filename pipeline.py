@@ -53,9 +53,10 @@ def answer(
         response = from_generation(generation, chunks, (perf_counter() - started) * 1000.0)
     except RAGError as exc:
         # Rebuilt, not re-raised: the original traceback would carry the frames (and locals)
-        # of whichever component raised it.
-        rebuild, args = exc.__reduce__()
-        failure = rebuild(*args)
+        # of whichever component raised it. The subclass constructor is bypassed: a component's
+        # own RAGError subclass need not take `(message)`.
+        failure = Exception.__new__(type(exc))
+        RAGError.__init__(failure, exc.code, exc.message)
     except Exception:
         error_type, message = _STAGES[stage]
         failure = error_type(message)
