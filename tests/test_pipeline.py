@@ -17,6 +17,7 @@ from normalizer import (
     RetrievalError,
 )
 from tests.contract import assert_valid_rag_response
+from tests.test_retriever import point, retriever_over
 
 SECRET = "test-not-a-key-LEAK"
 
@@ -183,7 +184,11 @@ def test_a_retriever_raising_empty_retrieval_never_calls_the_generator():
 def test_rag_errors_are_not_wrapped(side, error):
     retriever = StubRetriever(error=error if side == "retriever" else None)
     generator = StubGenerator(error=error if side == "generator" else None)
-    assert failure(retriever, generator) is error
+    rebuilt = failure(retriever, generator)
+    # Rebuilt so the component's own frames stay out of the traceback: same type, code, message.
+    assert rebuilt is not error
+    assert (type(rebuilt), rebuilt.code, rebuilt.message) == (type(error), error.code, error.message)
+    assert rebuilt.__cause__ is None and rebuilt.__context__ is None
 
 
 # --- anything else becomes the right RAGError, cleanly ---------------------------------
@@ -233,6 +238,22 @@ def test_a_generation_that_bypassed_validation_is_a_payload_error():
 def test_generator_failures_keep_the_query_and_context_out_of_captured_locals(boom):
     err = failure_on_leaky_input(StubRetriever(result=[leaky_chunk()]), StubGenerator(error=boom))
     assert_no_payload_in_pipeline_frames(err)
+
+
+@pytest.mark.parametrize(
+    "points,kind",
+    [
+        ((), EmptyRetrievalError),
+        # A hit without source_id fails while its payload (the chunk text) is a local.
+        ((point(1, [1.0, 0.0, 0.0], text="private LEAK text"),), RetrievalError),
+    ],
+)
+def test_a_real_retriever_failure_leaves_no_query_or_text_in_the_whole_traceback(points, kind):
+    err = failure_on_leaky_input(retriever_over(points=points), StubGenerator())
+    assert type(err) is kind
+    assert_clean(err)
+    frames = [f.f_code.co_filename for f, _ in traceback.walk_tb(err.__traceback__)]
+    assert not any(name.endswith("retriever.py") for name in frames)
 
 
 def test_retriever_failures_keep_the_query_out_of_captured_locals():

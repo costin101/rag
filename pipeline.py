@@ -4,6 +4,8 @@ Knows neither the vector store nor the provider: both arrive as interfaces. Late
 here so every path reports the same quantity. Callers see a `RAGResponse` or a `RAGError`; any
 other failure is converted to the `RAGError` for the stage it came from, with a fixed message
 and no cause, context or secret attached (the new error is raised outside the `except` block).
+A `RAGError` from a component is rebuilt the same way (same type, code and message), so no
+component frame, and none of its locals, rides along in the traceback.
 """
 
 from time import perf_counter
@@ -49,8 +51,11 @@ def answer(
         stage = "normalize"
         # from_generation validates: a wrong type or a model_construct bypass fails right here.
         response = from_generation(generation, chunks, (perf_counter() - started) * 1000.0)
-    except RAGError:
-        raise
+    except RAGError as exc:
+        # Rebuilt, not re-raised: the original traceback would carry the frames (and locals)
+        # of whichever component raised it.
+        rebuild, args = exc.__reduce__()
+        failure = rebuild(*args)
     except Exception:
         error_type, message = _STAGES[stage]
         failure = error_type(message)
