@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import anthropic
 
-from config import Settings
+from config import DEFAULT_PROVIDER_BASE_URL, Settings
 from normalizer import (
     ConfigError,
     ContextChunk,
@@ -57,6 +57,7 @@ def _sdk_overrides_hold() -> bool:
     try:
         probe = _SdkClient(
             api_key="probe",
+            base_url=DEFAULT_PROVIDER_BASE_URL,
             webhook_key="",
             default_headers={_PROBE_HEADER: "1"},
             open_telemetry=False,
@@ -178,17 +179,24 @@ class AnthropicProvider:
         )
 
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation:
+        # No local ever holds the SDK message: a traceback with captured locals would
+        # otherwise expose its repr (model text built from private chunks) to the logs.
         failure = None
-        response = None
+        problem = None
+        generation = None
         try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=self._max_tokens,
-                system=_SYSTEM,
-                messages=[{"role": "user", "content": _user_turn(query, chunks)}],
+            generation = _map_message(
+                self._client.messages.create(
+                    model=self._model,
+                    max_tokens=self._max_tokens,
+                    system=_SYSTEM,
+                    messages=[{"role": "user", "content": _user_turn(query, chunks)}],
+                )
             )
         except RAGError:
             raise
+        except _Unusable as exc:
+            problem = exc.reason
         except anthropic.APIStatusError as exc:
             failure = _http_failure(exc)
         except anthropic.APITimeoutError:
@@ -199,16 +207,6 @@ class AnthropicProvider:
             failure = "the provider request failed unexpectedly"
         if failure is not None:
             raise ProviderError(failure)
-        return self._to_generation(response)
-
-    @staticmethod
-    def _to_generation(response) -> Generation:
-        problem = None
-        generation = None
-        try:
-            generation = _map_message(response)
-        except _Unusable as exc:
-            problem = exc.reason
         if problem is not None:
             raise ProviderPayloadError(problem)
         return generation

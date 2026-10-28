@@ -348,6 +348,7 @@ def test_chunk_ids_cannot_break_out_of_the_attribute():
     content = rec.sent["messages"][0]["content"]
     assert "<injected>" not in content
     assert len(re.findall(r"<chunk ", content)) == 1
+    assert "&quot;" in content
 
 
 def test_query_cannot_close_the_question_tag():
@@ -702,7 +703,9 @@ def test_errors_never_expose_the_key_or_a_cause(handler):
     assert API_KEY not in str(err) and "LEAK" not in str(err)
     assert "LEAK" not in repr(err)
     trace = traceback.TracebackException.from_exception(err, capture_locals=True)
-    assert "LEAK" not in "".join(trace.format())
+    formatted = "".join(trace.format())
+    assert "LEAK" not in formatted
+    assert "Message(" not in formatted and "msg_1" not in formatted
 
 
 def test_provider_repr_hides_the_key():
