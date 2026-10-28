@@ -1,7 +1,7 @@
 """Single-query CLI for the API path: `python main.py QUERY`.
 
-stdout is one JSON document (a `RAGResponse`). A failure prints exactly one line, `<code>: <message>`,
-to stderr and exits 1; a usage error exits 2. No traceback, cause or SDK repr ever reaches the
+stdout is one JSON document (a `RAGResponse`). A failure ends with a line `<code>: <message>` on
+stderr (the embedding hub client may print progress or warnings before it) and exits 1; a usage error exits 2. No traceback, cause or SDK repr ever reaches the
 output: every exception is converted here, and a non-`RAGError` prints a fixed line only.
 """
 
