@@ -34,6 +34,11 @@ _COLLECTION = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
 
 TextField = Annotated[str, Field(min_length=1)]
 
+# The default embedding model and its pinned Hugging Face commit (checked 2026-10-28).
+# A different RAG_EMBED_MODEL must name its own revision.
+DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_EMBED_REVISION = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
@@ -51,8 +56,8 @@ class Settings(BaseModel):
     QDRANT_TIMEOUT_S: TimeoutS = 10
 
     RAG_TOP_K: StrictInt = Field(default=5, ge=1, le=50)
-    RAG_EMBED_MODEL: TextField = "BAAI/bge-small-en-v1.5"
-    RAG_EMBED_REVISION: TextField | None = None
+    RAG_EMBED_MODEL: TextField = DEFAULT_EMBED_MODEL
+    RAG_EMBED_REVISION: TextField = Field(default=None, validate_default=True)
     RAG_EMBED_CACHE_DIR: Path | None = None
 
     @field_validator("RAG_MAX_TOKENS", "RAG_TOP_K", mode="before")
@@ -104,6 +109,18 @@ class Settings(BaseModel):
         if isinstance(value, str) and "\0" in value:
             raise ValueError("must not contain a NUL byte")
         return value
+
+    @field_validator("RAG_EMBED_REVISION", mode="before")
+    @classmethod
+    def _pinned_revision(cls, value, info: ValidationInfo):
+        if value is not None:
+            return value
+        model = info.data.get("RAG_EMBED_MODEL")
+        if model is None:  # the model itself failed validation; that error is reported
+            return DEFAULT_EMBED_REVISION
+        if model != DEFAULT_EMBED_MODEL:
+            raise ValueError("required when RAG_EMBED_MODEL is not the default model")
+        return DEFAULT_EMBED_REVISION
 
     @field_validator("QDRANT_URL")
     @classmethod

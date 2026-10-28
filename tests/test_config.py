@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from config import ConfigError, Settings, load_settings
+from config import DEFAULT_EMBED_MODEL, DEFAULT_EMBED_REVISION, ConfigError, Settings, load_settings
 from normalizer import ErrorCode, RAGError
 
 API_KEY = "test-not-a-key-anthropic"
@@ -42,7 +42,7 @@ def test_minimal_env_applies_defaults():
     assert s.RAG_TOP_K == 5
     assert s.RAG_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
     assert s.RAG_EMBED_CACHE_DIR is None
-    assert s.RAG_EMBED_REVISION is None
+    assert s.RAG_EMBED_REVISION == DEFAULT_EMBED_REVISION
     assert s.QDRANT_API_KEY is None
     assert s.ANTHROPIC_API_KEY.get_secret_value() == API_KEY
     assert s.QDRANT_URL == "http://localhost:6333"
@@ -134,7 +134,7 @@ def test_blank_optional_falls_back_to_default():
     s = load_settings(
         valid_env(RAG_TOP_K="  ", RAG_MODEL="", QDRANT_API_KEY=" ", RAG_EMBED_REVISION="\t")
     )
-    assert s.RAG_EMBED_REVISION is None
+    assert s.RAG_EMBED_REVISION == DEFAULT_EMBED_REVISION
     assert s.RAG_TOP_K == 5
     assert s.RAG_MODEL == "claude-sonnet-5-5"
     assert s.QDRANT_API_KEY is None
@@ -347,8 +347,36 @@ def test_cache_dir_rejects_nul_byte():
     assert "RAG_EMBED_CACHE_DIR" in str(error_for(valid_env(RAG_EMBED_CACHE_DIR="/tmp/a\x00b")))
 
 
-def test_embed_revision_is_optional_string():
-    assert load_settings(valid_env()).RAG_EMBED_REVISION is None
+def test_embed_revision_defaults_to_pinned_hash_for_default_model():
+    assert DEFAULT_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
+    assert len(DEFAULT_EMBED_REVISION) == 40
+    assert set(DEFAULT_EMBED_REVISION) <= set("0123456789abcdef")
+    s = load_settings(valid_env())
+    assert s.RAG_EMBED_MODEL == DEFAULT_EMBED_MODEL
+    assert s.RAG_EMBED_REVISION == DEFAULT_EMBED_REVISION
+
+
+def test_embed_revision_required_for_non_default_model():
+    err = error_for(valid_env(RAG_EMBED_MODEL="some/embedder"))
+    assert "RAG_EMBED_REVISION" in str(err)
+    assert "some/embedder" not in str(err)
+    assert load_settings(
+        valid_env(RAG_EMBED_MODEL="some/embedder", RAG_EMBED_REVISION="abc123")
+    ).RAG_EMBED_REVISION == "abc123"
+
+
+def test_embed_revision_required_on_direct_construction_for_non_default_model():
+    with pytest.raises(ValidationError):
+        Settings(
+            ANTHROPIC_API_KEY=API_KEY,
+            QDRANT_URL="http://localhost:6333",
+            QDRANT_COLLECTION="docs",
+            RAG_EMBED_MODEL="some/embedder",
+        )
+
+
+def test_embed_revision_can_override_the_default():
+    assert load_settings(valid_env(RAG_EMBED_REVISION="abc123")).RAG_EMBED_REVISION == "abc123"
     assert load_settings(valid_env(RAG_EMBED_REVISION=" deadbeef ")).RAG_EMBED_REVISION == "deadbeef"
 
 
