@@ -377,6 +377,7 @@ EXPECTED_FIELDS = {
     "Usage": {"input_tokens", "output_tokens"},
     "Metrics": {"latency_ms"},
     "RAGResponse": {"answer", "chunks", "sources", "usage", "metrics"},
+    "Generation": {"text", "input_tokens", "output_tokens"},
 }
 
 
