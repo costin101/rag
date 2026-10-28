@@ -42,7 +42,6 @@ def job_spec(job_id, image, mode="ok", memory=128):
             "RestartPolicy": {"Attempts": 0, "Mode": "fail"},
             "ReschedulePolicy": {"Attempts": 0, "Unlimited": False},
             "EphemeralDisk": {"SizeMB": 50},
-            "Networks": [{"Mode": "none"}],
             "Tasks": [{
                 "Name": "gen", "Driver": "docker", "User": "65532",
                 "Config": {
