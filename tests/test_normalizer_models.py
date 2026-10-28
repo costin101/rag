@@ -1,6 +1,8 @@
+import copy
 import inspect
 import json
 import math
+import pickle
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -434,3 +436,27 @@ def test_validation_errors_never_echo_input(factory):
     with pytest.raises(ValidationError) as excinfo:
         factory("MARKERVALUE")
     assert "MARKERVALUE" not in str(excinfo.value)
+
+
+# --- copy / pickle round trip (review PR #17) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RAGError(ErrorCode.INVALID_QUERY, "x"),
+        ConfigError("x"),
+        InvalidQueryError("x"),
+        RetrievalError("x"),
+        EmptyRetrievalError("x"),
+        ProviderError("x"),
+        ProviderPayloadError("x"),
+    ],
+)
+@pytest.mark.parametrize("roundtrip", [copy.copy, copy.deepcopy, lambda e: pickle.loads(pickle.dumps(e))])
+def test_errors_survive_copy_and_pickle(error, roundtrip):
+    clone = roundtrip(error)
+    assert type(clone) is type(error)
+    assert str(clone) == str(error)
+    assert clone.code == error.code
+    assert clone.message == error.message

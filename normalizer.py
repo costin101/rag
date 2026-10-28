@@ -51,8 +51,6 @@ class _Model(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
 
-
-
 class ContextChunk(_Model):
     id: str
     text: str
@@ -129,6 +127,11 @@ class RAGError(Exception):
         super().__init__(f"{code.value}: {message}")
         self.code = code
         self.message = message
+
+    def __reduce__(self):
+        # Subclasses fix their code and take only the message; the base takes both.
+        args = (self.code, self.message) if type(self) is RAGError else (self.message,)
+        return (type(self), args)
 
 
 class ConfigError(RAGError):
