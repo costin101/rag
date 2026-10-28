@@ -4,7 +4,7 @@ Hybrid RAG service: answers queries through a pool of ephemeral, resource-bounde
 
 ## Non-negotiable architecture rules
 1. **Single response contract**: `RAGResponse` (normalizer.py) is the only shape callers see. Path-specific output is converted by an adapter; no caller branches on which path ran.
-2. **Bounded, ephemeral containers**: every session container carries explicit CPU and memory limits from config, is created at session start, reused for that session's queries, and purged at session end, close, error, or process exit (including SIGINT/SIGTERM). Live containers never exceed `max_containers`.
+2. **Bounded, ephemeral containers**: every session container carries explicit CPU and memory limits from config and serves exactly one session: created at session start or pre-created into a config-sized warm pool and claimed atomically, never reassigned. It is reused for that session's queries and purged at session end, close, error, or process exit (including SIGINT/SIGTERM), idle and starting warm containers included. Active, idle and starting containers never exceed `max_containers`.
 3. **Sticky session routing**: path (container or API) is decided once at session start; a session keeps its path. Pool exhaustion, container start failure, or mid-session loss falls back — never fails the request.
 4. **Config is the only source of settings**: Nomad host, resource bounds, pool capacity, vector store URL, provider and keys come from `config.py` (env-validated). No hardcoded hosts, limits, or secrets.
 5. **Provider and retriever are interfaces**: the fallback LLM provider and the vector store client sit behind one interface each. Adding one must not touch routing or normalization.
