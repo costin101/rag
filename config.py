@@ -47,6 +47,8 @@ DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBED_REVISION = "aa8f8b060edb00e03bfdd08813a2949946c8ba55"
 # Passed explicitly to the download so the ambient HF_ENDPOINT never picks the host.
 DEFAULT_EMBED_ENDPOINT = "https://huggingface.co"
+# Passed explicitly to the SDK so the ambient ANTHROPIC_BASE_URL never picks the key's host.
+DEFAULT_PROVIDER_BASE_URL = "https://api.anthropic.com"
 
 
 class Settings(BaseModel):
@@ -58,6 +60,7 @@ class Settings(BaseModel):
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
     RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30.0
     RAG_PROVIDER_MAX_RETRIES: StrictInt = Field(default=2, ge=0, le=10)
+    RAG_PROVIDER_BASE_URL: str = DEFAULT_PROVIDER_BASE_URL
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
     QDRANT_API_KEY: SecretStr | None = None
@@ -137,7 +140,7 @@ class Settings(BaseModel):
             raise ValueError("required when RAG_EMBED_MODEL is not the default model")
         return DEFAULT_EMBED_REVISION
 
-    @field_validator("RAG_EMBED_ENDPOINT")
+    @field_validator("RAG_PROVIDER_BASE_URL", "RAG_EMBED_ENDPOINT")
     @classmethod
     def _https_endpoint(cls, url: str) -> str:
         problem = url_problem(url, allow_query=False)

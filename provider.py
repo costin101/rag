@@ -7,9 +7,7 @@ the SDK's message or a chained cause: errors are raised outside the `except` blo
 caught the SDK's, and a traceback with captured locals holds no secret either.
 """
 
-import os
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Sequence
 from html import escape
 from typing import TYPE_CHECKING, Protocol
 
@@ -40,33 +38,23 @@ _SYSTEM = (
     "If the context does not contain the answer, say so plainly. Do not invent facts."
 )
 
-# Stripped from the environment while the client is built (the SDK reads them at construction):
-# an ambient value could redirect the key to another host, or add headers or credentials. Only
-# these are handled. ANTHROPIC_OPEN_TELEMETRY* is handled by `open_telemetry=False` instead;
-# every other ANTHROPIC_* variable (e.g. ANTHROPIC_LOG) is left as is.
-# Config is the only source of settings (rule 4).
-_AMBIENT = (
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_CUSTOM_HEADERS",
-    "ANTHROPIC_PROFILE",
-    "ANTHROPIC_CONFIG_DIR",
-    "ANTHROPIC_WEBHOOK_SIGNING_KEY",
-)
+
+class _Client(anthropic.Anthropic):
+    """The SDK client with the environment's custom headers removed.
+
+    The SDK merges ANTHROPIC_CUSTOM_HEADERS into the default headers at construction, whatever
+    arguments it is given, so no argument can defeat it. The headers passed in are the only
+    ones kept; this also holds for copies (`with_options`), which rebuild through `__init__`.
+    """
+
+    def __init__(self, **kwargs):
+        explicit = dict(kwargs.get("default_headers") or {})
+        super().__init__(**kwargs)
+        self._custom_headers = explicit
 
 
 class Provider(Protocol):
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation: ...
-
-
-@contextmanager
-def _without_ambient_anthropic_env() -> Iterator[None]:
-    saved = {name: os.environ.pop(name) for name in _AMBIENT if name in os.environ}
-    try:
-        yield
-    finally:
-        os.environ.update(saved)
 
 
 def _user_turn(query: str, chunks: Sequence[ContextChunk]) -> str:
@@ -91,7 +79,12 @@ def _http_failure(exc: anthropic.APIStatusError) -> str:
 
 
 class AnthropicProvider:
-    """Anthropic Messages API: text blocks only, no tools, client built from Settings alone."""
+    """Anthropic Messages API: text blocks only, no tools, client built from Settings alone.
+
+    Construction writes no environment variable and no ANTHROPIC_* value changes the client
+    (ANTHROPIC_LOG only sets SDK log verbosity), so it is safe to run while other threads
+    read the environment.
+    """
 
     def __init__(
         self,
@@ -105,16 +98,23 @@ class AnthropicProvider:
         # An explicit argument (tests) wins; otherwise config decides, never the SDK default.
         if max_retries is None:
             max_retries = settings.RAG_PROVIDER_MAX_RETRIES
-        with _without_ambient_anthropic_env():
-            self._client = anthropic.Anthropic(
-                api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
-                timeout=settings.RAG_PROVIDER_TIMEOUT_S,
-                max_retries=max_retries,
-                http_client=http_client,
-                # No spans, so queries and chunks never reach a tracer; also stops the SDK
-                # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.
-                open_telemetry=False,
-            )
+        # Every setting is passed explicitly and the process environment is never touched: an
+        # explicit credential stops the SDK reading ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
+        # ANTHROPIC_PROFILE and the federation variables; the other arguments below cover the
+        # remaining ANTHROPIC_* variables the constructor reads.
+        self._client = _Client(
+            api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
+            base_url=settings.RAG_PROVIDER_BASE_URL,
+            # Not used (no webhooks); non-None so ANTHROPIC_WEBHOOK_SIGNING_KEY is not read.
+            webhook_key="",
+            default_headers={},
+            timeout=settings.RAG_PROVIDER_TIMEOUT_S,
+            max_retries=max_retries,
+            http_client=http_client,
+            # No spans, so queries and chunks never reach a tracer; also stops the SDK
+            # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.
+            open_telemetry=False,
+        )
 
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation:
         failure = None

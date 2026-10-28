@@ -662,3 +662,38 @@ def test_invalid_embed_endpoint(bad):
 def test_embed_endpoint_must_be_https_case_insensitively():
     s = load_settings(valid_env(RAG_EMBED_ENDPOINT="HTTPS://hub.example.com"))
     assert s.RAG_EMBED_ENDPOINT == "HTTPS://hub.example.com"
+
+
+# --- provider base URL (red team: ambient ANTHROPIC_BASE_URL must not pick the key's host) ---
+
+
+def test_provider_base_url_defaults_to_the_public_api():
+    assert load_settings(valid_env()).RAG_PROVIDER_BASE_URL == "https://api.anthropic.com"
+
+
+def test_provider_base_url_can_be_overridden_with_https():
+    s = load_settings(valid_env(RAG_PROVIDER_BASE_URL="https://gateway.example.com/anthropic"))
+    assert s.RAG_PROVIDER_BASE_URL == "https://gateway.example.com/anthropic"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://gateway.example.com",
+        "ftp://gateway.example.com",
+        "gateway.example.com",
+        "https://TOKEN@gateway.example.com",
+        "https://gateway.example.com/?k=v",
+        "https://gateway.example.com#frag",
+        "https://gateway.example.com:abc",
+    ],
+)
+def test_invalid_provider_base_url(bad):
+    err = error_for(valid_env(RAG_PROVIDER_BASE_URL=bad))
+    assert "RAG_PROVIDER_BASE_URL" in str(err)
+    assert "TOKEN" not in f"{err} {full_trace(err)}"
+
+
+def test_provider_base_url_must_be_https_case_insensitively():
+    s = load_settings(valid_env(RAG_PROVIDER_BASE_URL="HTTPS://gateway.example.com"))
+    assert s.RAG_PROVIDER_BASE_URL == "HTTPS://gateway.example.com"

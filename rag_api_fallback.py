@@ -13,10 +13,10 @@ from retriever import QdrantRetriever, Retriever
 class ApiPath:
     """Built once and reused, so the embedding model and clients load once per process.
 
-    Callers must build one `ApiPath` and reuse it: construction builds the provider (which
-    briefly strips ANTHROPIC_* variables from the process environment) and the retriever, whose
-    embedding model loads on first use. Building one per query repeats that every time, and
-    concurrent constructions would race on the environment. No locking is done here.
+    Callers must build one `ApiPath` and reuse it: construction builds the provider and the
+    retriever, whose embedding model loads on first use. Building one per query repeats that
+    every time. Construction does not touch the process environment, so it may run alongside
+    other threads; no locking is done here.
     """
 
     def __init__(

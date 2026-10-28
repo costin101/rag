@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import threading
 import traceback
 
 import httpx2
@@ -196,21 +197,69 @@ def test_query_cannot_close_the_question_tag():
     assert content.count("<context>") == 1
 
 
-# --- no implicit environment reads ---------------------------------------------
+# --- no implicit environment reads, no environment writes -----------------------
+
+AMBIENT = {
+    "ANTHROPIC_BASE_URL": "https://evil.invalid",
+    "ANTHROPIC_AUTH_TOKEN": "test-not-a-key-LEAK-token",
+    "ANTHROPIC_API_KEY": "test-not-a-key-LEAK-env",
+    "ANTHROPIC_CUSTOM_HEADERS": "X-Evil: 1\nAuthorization: Bearer test-not-a-key-LEAK-header",
+    "ANTHROPIC_PROFILE": "evil",
+    "ANTHROPIC_CONFIG_DIR": "/nonexistent-evil-dir",
+    "ANTHROPIC_WEBHOOK_SIGNING_KEY": "test-not-a-key-LEAK-webhook",
+    "ANTHROPIC_IDENTITY_TOKEN": "test-not-a-key-LEAK-identity",
+    "ANTHROPIC_FEDERATION_RULE_ID": "rule",
+    "ANTHROPIC_ORGANIZATION_ID": "org",
+}
 
 
 def test_environment_does_not_redirect_or_re_credential_the_client(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.invalid")
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-not-a-key-LEAK-token")
-    monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "X-Evil: 1")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key-LEAK-env")
+    for name, value in AMBIENT.items():
+        monkeypatch.setenv(name, value)
     rec = Recorder()
     provider_for(rec).generate("q", [chunk()])
     request = rec.requests[-1]
     assert request.url.host == "api.anthropic.com"
     assert request.headers["authorization"] == f"Bearer {API_KEY}"
-    assert "LEAK-token" not in str(request.headers) and "LEAK-env" not in str(request.headers)
+    assert "LEAK" not in str(request.headers)
     assert "x-evil" not in request.headers
+
+
+@pytest.mark.parametrize("name", sorted(AMBIENT))
+def test_each_ambient_variable_alone_changes_nothing(monkeypatch, name):
+    monkeypatch.setenv(name, AMBIENT[name])
+    rec = Recorder()
+    provider_for(rec).generate("q", [chunk()])
+    request = rec.requests[-1]
+    assert request.url.host == "api.anthropic.com"
+    assert request.headers.get_list("authorization") == [f"Bearer {API_KEY}"]
+    assert "LEAK" not in str(request.headers)
+    assert "x-evil" not in request.headers
+
+
+def test_ambient_custom_headers_do_not_survive_a_client_copy(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "X-Evil: 1")
+    provider = provider_for(Recorder())
+    assert "X-Evil" not in provider._client.default_headers
+    assert "X-Evil" not in provider._client.with_options(max_retries=1).default_headers
+
+
+def test_client_does_not_resolve_ambient_credentials(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_PROFILE", "evil")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-not-a-key-LEAK-token")
+    monkeypatch.setenv("ANTHROPIC_WEBHOOK_SIGNING_KEY", "test-not-a-key-LEAK-webhook")
+    client = provider_for(Recorder())._client
+    assert client.credentials is None
+    assert client.auth_token is None
+    assert "LEAK" not in (client.webhook_key or "")
+
+
+def test_base_url_comes_from_settings_not_the_environment(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.invalid")
+    rec = Recorder()
+    cfg = settings(RAG_PROVIDER_BASE_URL="https://gateway.example.com")
+    provider_for(rec, cfg).generate("q", [chunk()])
+    assert rec.requests[-1].url.host == "gateway.example.com"
 
 
 def test_telemetry_is_disabled_whatever_the_environment_says(monkeypatch):
@@ -226,17 +275,97 @@ def test_telemetry_is_disabled_by_default():
     assert provider_for(Recorder())._client.open_telemetry["traces"]["enabled"] is False
 
 
-def test_environment_is_restored_after_construction(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://kept.invalid")
+class WatchedEnviron(dict):
+    """os.environ stand-in that records every write or delete."""
+
+    def __init__(self, *args, **kw):
+        super().__init__(*args, **kw)
+        self.writes = []
+
+    def __setitem__(self, key, value):
+        self.writes.append(("set", key))
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self.writes.append(("del", key))
+        super().__delitem__(key)
+
+    def pop(self, key, *default):
+        self.writes.append(("pop", key))
+        return super().pop(key, *default)
+
+    def update(self, *args, **kw):
+        self.writes.append(("update", None))
+        super().update(*args, **kw)
+
+
+def test_construction_never_writes_to_the_environment(monkeypatch):
+    watched = WatchedEnviron(os.environ)
+    watched.update(AMBIENT)
+    watched.writes.clear()
+    monkeypatch.setattr(os, "environ", watched)
+    cfg = settings()
+    provider_for(Recorder(), cfg)
+    assert watched.writes == []
+    assert all(watched[name] == value for name, value in AMBIENT.items())
+
+
+def test_environment_is_unchanged_during_construction(monkeypatch):
+    for name, value in AMBIENT.items():
+        monkeypatch.setenv(name, value)
+    seen = []
+    import anthropic
+
+    real_init = anthropic.Anthropic.__init__
+
+    def spying_init(self, *args, **kw):
+        seen.append({name: os.environ.get(name) for name in AMBIENT})
+        return real_init(self, *args, **kw)
+
+    monkeypatch.setattr(anthropic.Anthropic, "__init__", spying_init)
     provider_for(Recorder())
-    assert os.environ["ANTHROPIC_BASE_URL"] == "https://kept.invalid"
+    assert seen and all(snapshot == AMBIENT for snapshot in seen)
+    assert {name: os.environ.get(name) for name in AMBIENT} == AMBIENT
 
 
-def test_environment_is_restored_when_construction_fails(monkeypatch):
+def test_construction_failure_leaves_the_environment_alone(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://kept.invalid")
     with pytest.raises(Exception):
         AnthropicProvider(settings(), http_client="not a client", max_retries=0)
     assert os.environ["ANTHROPIC_BASE_URL"] == "https://kept.invalid"
+
+
+def test_concurrent_construction_does_not_break_load_settings(monkeypatch):
+    """Red-team repro: the old code popped ANTHROPIC_API_KEY while a client was being built."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", API_KEY)
+    monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
+    monkeypatch.setenv("QDRANT_COLLECTION", "docs")
+    cfg = load_settings()
+    stop = threading.Event()
+    errors = []
+
+    def build():
+        try:
+            while not stop.is_set():
+                AnthropicProvider(cfg)
+        except Exception as exc:  # surfaced below; a thread must not swallow it
+            errors.append(exc)
+
+    builder = threading.Thread(target=build)
+    builder.start()
+    failures = []
+    try:
+        for _ in range(1500):
+            try:
+                load_settings()
+            except ConfigError as exc:
+                failures.append(exc.message)
+                break
+    finally:
+        stop.set()
+        builder.join()
+    assert not errors
+    assert failures == []
 
 
 # --- provider failures -> ProviderError ----------------------------------------

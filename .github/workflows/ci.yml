@@ -30,11 +30,17 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.lock
       - name: Compile
         run: python -m compileall -q .
-      # The pinned embedding model downloads once, then restores from the cache.
+      # The pinned embedding model downloads once, then restores from the cache. The key tracks
+      # the lockfile (fastembed's cache layout) and the default model and pinned revision, so a
+      # config edit that leaves them alone keeps the cache.
+      - name: Embedding cache key
+        id: embed
+        run: |
+          python -c "from config import DEFAULT_EMBED_MODEL as m, DEFAULT_EMBED_REVISION as r; print(f'key={m.replace(chr(47), chr(45))}-{r}')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.embed-cache
-          key: embed-${{ hashFiles('config.py') }}
+          key: embed-${{ hashFiles('requirements.lock') }}-${{ steps.embed.outputs.key }}
       - name: Wait for Qdrant
         run: |
           for i in $(seq 1 30); do

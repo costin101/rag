@@ -26,6 +26,6 @@ testpaths = ["tests"]
 # Unit lane is network-free; integration/live tests opt out with @pytest.mark.enable_socket.
 addopts = "--disable-socket"
 markers = [
-    "integration: needs a real Qdrant (QDRANT_URL or a testcontainer)",
+    "integration: needs a real Qdrant (QDRANT_URL)",
     "live: calls the real Anthropic API (RAG_LIVE_ANTHROPIC=1)",
 ]
