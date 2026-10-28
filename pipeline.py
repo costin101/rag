@@ -53,10 +53,8 @@ def answer(
         response = from_generation(generation, chunks, (perf_counter() - started) * 1000.0)
     except RAGError as exc:
         # Rebuilt, not re-raised: the original traceback would carry the frames (and locals)
-        # of whichever component raised it. The subclass constructor is bypassed: a component's
-        # own RAGError subclass need not take `(message)`.
-        failure = Exception.__new__(type(exc))
-        RAGError.__init__(failure, exc.code, exc.message)
+        # of whichever component raised it.
+        failure = _rebuilt(exc)
     except Exception:
         error_type, message = _STAGES[stage]
         failure = error_type(message)
@@ -67,6 +65,21 @@ def answer(
         # the context or the generated text; the names are cleared on every exit path.
         query = chunks = generation = response = None
     raise failure
+
+
+def _rebuilt(exc: RAGError) -> RAGError:
+    """Same type, code and message as `exc`, with no traceback, cause or context.
+
+    The subclass constructor is bypassed (a component's own RAGError subclass need not take
+    `(message)`). A type that cannot be built that way, e.g. one that also inherits a built-in
+    with its own `__new__`, degrades to the base `RAGError` with the same code and message.
+    """
+    try:
+        rebuilt = type(exc).__new__(type(exc))
+        RAGError.__init__(rebuilt, exc.code, exc.message)
+    except Exception:
+        return RAGError(exc.code, exc.message)
+    return rebuilt
 
 
 def _chunks(result) -> list[ContextChunk]:

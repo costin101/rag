@@ -207,6 +207,18 @@ def test_a_component_error_subclass_with_its_own_constructor_is_rebuilt_cleanly(
     assert_clean(rebuilt)
 
 
+class OSRetrievalError(RetrievalError, OSError):
+    """A RAGError subclass that also inherits a built-in with its own `__new__`."""
+
+
+def test_a_component_error_subclass_that_cannot_be_rebuilt_degrades_to_a_clean_rag_error():
+    error = OSRetrievalError("store down")
+    rebuilt = failure(StubRetriever(error=error), StubGenerator())
+    assert isinstance(rebuilt, RAGError)
+    assert (rebuilt.code, rebuilt.message) == (error.code, error.message)
+    assert_clean(rebuilt)
+
+
 # --- anything else becomes the right RAGError, cleanly ---------------------------------
 
 
