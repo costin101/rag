@@ -1,0 +1,28 @@
+[project]
+name = "rag"
+version = "0.1.0"
+description = "Hybrid local/API RAG service: ephemeral Nomad session containers with a configurable external LLM API fallback and a unified RAGResponse."
+readme = "README.md"
+# 3.14 is the dev/CI target; the upper bound tracks onnxruntime (fastembed) wheel availability.
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-socket",
+    "pip-audit",
+    "pip-tools",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# Unit lane is network-free; integration/live tests opt out with @pytest.mark.enable_socket.
+addopts = "--disable-socket"
+markers = [
+    "integration: needs a real Qdrant (QDRANT_URL or a testcontainer)",
+    "live: calls the real Anthropic API (RAG_LIVE_ANTHROPIC=1)",
+]

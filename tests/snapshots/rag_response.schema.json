@@ -1,0 +1,146 @@
+{
+  "$defs": {
+    "ContextChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "source_id": {
+          "title": "Source Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "score",
+        "source_id"
+      ],
+      "title": "ContextChunk",
+      "type": "object"
+    },
+    "Metrics": {
+      "additionalProperties": false,
+      "properties": {
+        "latency_ms": {
+          "maximum": 1000000000,
+          "minimum": 0,
+          "title": "Latency Ms",
+          "type": "number"
+        }
+      },
+      "required": [
+        "latency_ms"
+      ],
+      "title": "Metrics",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uri"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Usage": {
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "maximum": 1000000000000,
+          "minimum": 0,
+          "title": "Input Tokens",
+          "type": "integer"
+        },
+        "output_tokens": {
+          "maximum": 1000000000000,
+          "minimum": 0,
+          "title": "Output Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens"
+      ],
+      "title": "Usage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "answer": {
+      "title": "Answer",
+      "type": "string"
+    },
+    "chunks": {
+      "items": {
+        "$ref": "#/$defs/ContextChunk"
+      },
+      "title": "Chunks",
+      "type": "array"
+    },
+    "metrics": {
+      "$ref": "#/$defs/Metrics"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "usage": {
+      "$ref": "#/$defs/Usage"
+    }
+  },
+  "required": [
+    "answer",
+    "chunks",
+    "sources",
+    "usage",
+    "metrics"
+  ],
+  "title": "RAGResponse",
+  "type": "object"
+}
