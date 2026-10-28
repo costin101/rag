@@ -19,7 +19,7 @@ flowchart LR
 ```
 
 Evidence:
-- caller -> CLI: `main.py` `run` prints one `RAGResponse` JSON document, or one `<code>: <message>` line on failure.
+- caller -> CLI: `main.py` `run` prints one `RAGResponse` JSON document, or ends with a `<code>: <message>` line on failure.
 - CLI -> pipeline: `rag_api_fallback.py` `ApiPath.answer` calls `pipeline.answer`.
 - pipeline -> Qdrant: `retriever.py` `QdrantRetriever` (query embedded on the host by fastembed; pinned model revision requested from `RAG_EMBED_ENDPOINT`). External; `QDRANT_URL`, `QDRANT_COLLECTION`.
 - pipeline -> Anthropic: `provider.py` `AnthropicProvider` over HTTPS to `RAG_PROVIDER_BASE_URL`. Queries and retrieved chunk text leave the host.
