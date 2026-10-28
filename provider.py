@@ -163,20 +163,31 @@ class AnthropicProvider:
         # explicit credential stops the SDK reading ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
         # ANTHROPIC_PROFILE and the federation variables; the other arguments below cover the
         # remaining ANTHROPIC_* variables the constructor reads.
-        self._client = _Client(
-            api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
-            base_url=settings.RAG_PROVIDER_BASE_URL,
-            # Not used (no webhooks); non-None so ANTHROPIC_WEBHOOK_SIGNING_KEY is not read.
-            webhook_key="",
-            default_headers={},
-            timeout=settings.RAG_PROVIDER_TIMEOUT_S,
-            max_retries=max_retries,
-            max_retry_wait_s=settings.RAG_PROVIDER_MAX_RETRY_WAIT_S,
-            http_client=http_client,
-            # No spans, so queries and chunks never reach a tracer; also stops the SDK
-            # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.
-            open_telemetry=False,
-        )
+        client = None
+        try:
+            client = _Client(
+                api_key=settings.ANTHROPIC_API_KEY.get_secret_value(),
+                base_url=settings.RAG_PROVIDER_BASE_URL,
+                # Not used (no webhooks); non-None so ANTHROPIC_WEBHOOK_SIGNING_KEY is not read.
+                webhook_key="",
+                default_headers={},
+                timeout=settings.RAG_PROVIDER_TIMEOUT_S,
+                max_retries=max_retries,
+                max_retry_wait_s=settings.RAG_PROVIDER_MAX_RETRY_WAIT_S,
+                http_client=http_client,
+                # No spans, so queries and chunks never reach a tracer; also stops the SDK
+                # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.
+                open_telemetry=False,
+            )
+        except Exception:
+            client = None
+        # Raised outside the `except`, so the error carries no cause or context (the SDK
+        # message could echo a rejected argument, e.g. the key).
+        if client is None:
+            raise ConfigError(
+                "invalid configuration: anthropic SDK: client could not be constructed"
+            )
+        self._client = client
 
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation:
         # No local ever holds the SDK message: a traceback with captured locals would

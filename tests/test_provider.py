@@ -492,9 +492,17 @@ def test_environment_is_unchanged_during_construction(monkeypatch):
 
 def test_construction_failure_leaves_the_environment_alone(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://kept.invalid")
-    with pytest.raises(Exception):
+    with pytest.raises(ConfigError):
         AnthropicProvider(settings(), http_client="not a client", max_retries=0)
     assert os.environ["ANTHROPIC_BASE_URL"] == "https://kept.invalid"
+
+
+def test_construction_failure_is_a_config_error_without_cause_or_secret():
+    with pytest.raises(ConfigError) as caught:
+        AnthropicProvider(settings(), http_client="not a client", max_retries=0)
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is False and caught.value.__context__ is None
+    assert API_KEY not in str(caught.value)
 
 
 def test_concurrent_construction_does_not_break_load_settings(monkeypatch):
