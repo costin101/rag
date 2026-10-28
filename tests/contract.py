@@ -8,7 +8,7 @@ from normalizer import RAGResponse, is_blank
 
 TOP_LEVEL = {"answer", "chunks", "sources", "usage", "metrics"}
 CHUNK_KEYS = {"id", "text", "score", "source_id"}
-SOURCE_KEYS = {"id", "title", "uri"}
+SOURCE_KEYS = {"id"}
 USAGE_KEYS = {"input_tokens", "output_tokens"}
 METRICS_KEYS = {"latency_ms"}
 
@@ -57,10 +57,6 @@ def assert_valid_rag_response(obj) -> None:
     for i, source in enumerate(sources):
         _keys(source, SOURCE_KEYS, f"sources[{i}]")
         assert isinstance(source["id"], str), f"sources[{i}].id must be text"
-        for key in ("title", "uri"):
-            assert source[key] is None or isinstance(source[key], str), (
-                f"sources[{i}].{key} must be text or null"
-            )
     source_ids = [s["id"] for s in sources]
     assert len(set(source_ids)) == len(source_ids), "source ids must be unique"
     missing = {c["source_id"] for c in chunks} - set(source_ids)

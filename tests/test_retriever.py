@@ -187,8 +187,8 @@ def test_integer_and_uuid_point_ids_become_string_chunk_ids():
     assert {c.id for c in chunks} == {uid, "1"}
 
 
-def test_optional_title_and_uri_payload_keys_are_accepted():
-    p = point(1, [1.0, 0.0, 0.0], text="t", source_id="s", title="A title", uri="https://x.test/a")
+def test_extra_payload_keys_are_ignored():
+    p = point(1, [1.0, 0.0, 0.0], text="t", source_id="s", title="A title", uri=5)
     (chunk,) = retriever_over(points=[p]).retrieve("q", 1)
     assert chunk.source_id == "s"
 
@@ -313,9 +313,6 @@ GOOD = {"text": "some text", "source_id": "s1"}
         {"text": "   ", "source_id": "s"},
         {"text": "t", "source_id": ""},
         {"text": "t", "source_id": " ​"},
-        {**GOOD, "title": 5},
-        {**GOOD, "uri": ["x"]},
-        {**GOOD, "title": {"a": 1}},
     ],
 )
 def test_bad_payload_is_a_retrieval_error(payload):

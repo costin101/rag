@@ -16,11 +16,11 @@ _TEST_NAME = re.compile(re.escape(TEST_PREFIX) + r"[A-Za-z0-9_-]+")
 
 FIXTURE_DOCS = (
     {"text": "The sky appears blue because air scatters short wavelengths of sunlight.",
-     "source_id": "weather", "title": "Why the sky is blue", "uri": "https://example.test/sky"},
+     "source_id": "weather"},
     {"text": "Photosynthesis lets green plants turn sunlight, water and carbon dioxide into sugar.",
-     "source_id": "plants", "title": "Photosynthesis"},
+     "source_id": "plants"},
     {"text": "The Pacific is the deepest and largest ocean on Earth.",
-     "source_id": "ocean", "title": "Oceans"},
+     "source_id": "ocean"},
     {"text": "Python is a programming language known for readable syntax.",
      "source_id": "code"},
 )

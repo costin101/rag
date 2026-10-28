@@ -101,7 +101,7 @@ def test_sources_are_deduplicated_and_order_stable():
 
 def test_sources_carry_only_the_id():
     (source,) = from_generation(gen(), [chunk()], 1.0).sources
-    assert (source.id, source.title, source.uri) == ("s1", None, None)
+    assert source.model_dump() == {"id": "s1"}
 
 
 def test_every_chunk_source_id_is_a_source():

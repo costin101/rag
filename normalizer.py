@@ -60,15 +60,6 @@ class ContextChunk(_Model):
 
 class Source(_Model):
     id: str
-    title: str | None = None
-    uri: str | None = None
-
-    @field_validator("uri")
-    @classmethod
-    def _http_uri_only(cls, uri: str | None) -> str | None:
-        if uri is None:
-            return None
-        return None if url_problem(uri, allow_query=True) else uri
 
 
 class Usage(_Model):
@@ -183,7 +174,7 @@ def from_generation(
     """Adapt a generation plus the chunks it was grounded on into the caller-visible response.
 
     Sources are derived from the chunks' source_id, deduplicated in first-seen order; chunks
-    carry no title or uri, so sources carry only their id. Zero chunks means the answer would
+    carry no title or uri, and a source is only its id. Zero chunks means the answer would
     be ungrounded: that is an EmptyRetrievalError, never a response.
     """
     if not chunks:

@@ -295,10 +295,6 @@ def _parse_point(point) -> ContextChunk:
         raise _Unusable("a hit has no payload")
     text = _text_field(payload, "text")
     source_id = _text_field(payload, "source_id")
-    # title and uri are optional; ContextChunk carries neither, but a wrong type is a bad store.
-    for key in ("title", "uri"):
-        if payload.get(key) is not None and not isinstance(payload[key], str):
-            raise _Unusable(f"a hit has an invalid '{key}' payload")
     point_id = getattr(point, "id", None)
     if isinstance(point_id, bool) or not isinstance(point_id, (int, str)) or is_blank(str(point_id)):
         raise _Unusable("a hit has no usable id")

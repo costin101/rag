@@ -25,12 +25,12 @@ Zone: `rag` (python, TDD). Rules in play: 1 (single response contract), 3, 4 (co
 RAGResponse { answer: str (non-blank), chunks: list[ContextChunk], sources: list[Source],
               usage: Usage{input_tokens:int>=0, output_tokens:int>=0}, metrics: Metrics{latency_ms:float>=0} }
 ContextChunk { id: str, text: str, score: float (finite), source_id: str }
-Source { id: str, title: str|None, uri: str|None }   # uri limited to http/https, else None
+Source { id: str }   # title/uri dropped 2026-10-28 by tech lead; revisit when an ingestion/source registry exists
 ```
 No `path`/`provider` field. "Caller cannot tell" = same shape AND same value semantics: the container stub (#8) reports deterministic non-zero token counts. `sources` = deduplicated, order-stable; "populated" = at least one source whose id derives from a returned chunk.
 
 ## Qdrant collection contract (external, ingestion out of scope)
-Vector config compatible with `RAG_EMBED_MODEL`; point payload keys `text`, `source_id`, optional `title`, `uri`. Mismatch → `retrieval_failed`. `tests/seed_qdrant.py` builds a fixture collection with a mandatory test prefix and refuses to touch any other collection.
+Vector config compatible with `RAG_EMBED_MODEL`; point payload keys `text`, `source_id` only (other keys are ignored). Mismatch → `retrieval_failed`. `tests/seed_qdrant.py` builds a fixture collection with a mandatory test prefix and refuses to touch any other collection.
 
 ## Error contract (`ErrorCode`)
 `config_invalid`, `invalid_query` (blank query), `retrieval_failed`, `empty_retrieval` (zero chunks: raise, never call the provider ungrounded), `provider_failed` (network/auth/rate/context-too-long), `provider_payload_invalid` (non-text-only/blank answer, missing/invalid usage, `stop_reason=max_tokens` truncation). Public set only; container failures (#8/#12) are internal fallback signals, never `RAGError`. No bare exception escapes `pipeline.answer`; a `RAGError` is not double-wrapped.
