@@ -8,7 +8,7 @@ Read the root CLAUDE.md first; this skill is its ENFORCEMENT CHECKLIST — one t
 
 ## Before writing code, verify the change against these boundaries
 - Response contract (rule 1): callers receive only `RAGResponse`. A caller importing a path-specific payload type or branching on path → wrong; add or extend an adapter in normalizer.py. (Enforced: review-only; contract test planned.)
-- Container lifecycle (rule 2): every container creation has a matching purge reachable from error, exit, and signal paths. A job registered without limits, or a purge only on the happy path → wrong. (Enforced: review-only; cleanup test planned.)
+- Container lifecycle (rule 2): every container creation has a matching purge reachable from error, exit, and signal paths. A job registered without limits, or a purge only on the happy path → wrong. The warm-pool replenisher counts as a creator: it needs the same purge on exit paths, claims must be atomic with no double-claim, and a pre-created container must hold no session data. (Enforced: review-only; cleanup test planned.)
 - Routing (rule 3): path is chosen once per session. Re-deciding per query, or surfacing pool exhaustion as an error → wrong; fall back. (Enforced: review-only.)
 - Config (rule 4): no literal hosts, limits, ports, or keys outside config.py. (Enforced: review-only.)
 - Interfaces (rule 5): provider- or vector-store-specific code outside its implementation module → wrong. (Enforced: review-only.)
