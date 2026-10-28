@@ -192,35 +192,39 @@ class AnthropicProvider:
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation:
         # No local ever holds the SDK message: a traceback with captured locals would
         # otherwise expose its repr (model text built from private chunks) to the logs.
-        failure = None
-        problem = None
-        generation = None
         try:
-            generation = _map_message(
-                self._client.messages.create(
-                    model=self._model,
-                    max_tokens=self._max_tokens,
-                    system=_SYSTEM,
-                    messages=[{"role": "user", "content": _user_turn(query, chunks)}],
+            failure = None
+            problem = None
+            generation = None
+            try:
+                generation = _map_message(
+                    self._client.messages.create(
+                        model=self._model,
+                        max_tokens=self._max_tokens,
+                        system=_SYSTEM,
+                        messages=[{"role": "user", "content": _user_turn(query, chunks)}],
+                    )
                 )
-            )
-        except RAGError:
-            raise
-        except _Unusable as exc:
-            problem = exc.reason
-        except anthropic.APIStatusError as exc:
-            failure = _http_failure(exc)
-        except anthropic.APITimeoutError:
-            failure = "the provider request timed out"
-        except anthropic.APIConnectionError:
-            failure = "could not connect to the provider"
-        except Exception:
-            failure = "the provider request failed unexpectedly"
-        if failure is not None:
-            raise ProviderError(failure)
-        if problem is not None:
-            raise ProviderPayloadError(problem)
-        return generation
+            except RAGError:
+                raise
+            except _Unusable as exc:
+                problem = exc.reason
+            except anthropic.APIStatusError as exc:
+                failure = _http_failure(exc)
+            except anthropic.APITimeoutError:
+                failure = "the provider request timed out"
+            except anthropic.APIConnectionError:
+                failure = "could not connect to the provider"
+            except Exception:
+                failure = "the provider request failed unexpectedly"
+            if failure is not None:
+                raise ProviderError(failure)
+            if problem is not None:
+                raise ProviderPayloadError(problem)
+            return generation
+        finally:
+            # Same reason as above: the query and the context stay out of captured locals.
+            query = chunks = generation = None
 
 
 class _Unusable(Exception):

@@ -37,6 +37,7 @@ def answer(
     """Answer `query` from retrieved context; `k=None` leaves top-k to the retriever."""
     started = perf_counter()
     stage = "retrieve"
+    chunks = generation = response = None
     try:
         if not isinstance(query, str) or is_blank(query):
             raise InvalidQueryError("the query must not be blank")
@@ -55,6 +56,10 @@ def answer(
         failure = error_type(message)
     else:
         return response
+    finally:
+        # A traceback with captured locals (error trackers do this) must not carry the query,
+        # the context or the generated text; the names are cleared on every exit path.
+        query = chunks = generation = response = None
     raise failure
 
 

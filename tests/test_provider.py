@@ -716,6 +716,17 @@ def test_errors_never_expose_the_key_or_a_cause(handler):
     assert "Message(" not in formatted and "msg_1" not in formatted
 
 
+@pytest.mark.parametrize("handler", failing_cases())
+def test_errors_keep_the_query_and_context_out_of_provider_locals(handler):
+    err = capture(provider_for(handler), "private-query", [chunk(text="private-context")])
+    frames = [
+        f for f, _ in traceback.walk_tb(err.__traceback__) if f.f_code.co_filename == provider_module.__file__
+    ]
+    assert frames
+    shown = "".join(repr(v) for f in frames for v in f.f_locals.values())
+    assert "private-query" not in shown and "private-context" not in shown
+
+
 def test_provider_repr_hides_the_key():
     p = provider_for(Recorder())
     assert "LEAK" not in repr(p)

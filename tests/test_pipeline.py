@@ -57,6 +57,27 @@ def failure(retriever, generator, query="why?", **kw):
     return excinfo.value
 
 
+PRIVATE_QUERY = "why LEAK?"
+
+
+def leaky_chunk():
+    return ContextChunk(id="c1", text="private LEAK text", score=0.5, source_id="s1")
+
+
+def failure_on_leaky_input(retriever, generator):
+    # Reads the query from a module constant so no local of this frame holds it.
+    with pytest.raises(RAGError) as excinfo:
+        pipeline.answer(PRIVATE_QUERY, retriever, generator)
+    return excinfo.value
+
+
+def assert_no_payload_in_pipeline_frames(err):
+    """Locals of the pipeline's own frames, as an error tracker would capture them."""
+    frames = [f for f, _ in traceback.walk_tb(err.__traceback__) if f.f_code.co_filename == pipeline.__file__]
+    assert frames
+    assert "LEAK" not in "".join(repr(v) for f in frames for v in f.f_locals.values())
+
+
 def assert_clean(err):
     assert err.__cause__ is None and err.__context__ is None
     text = f"{err} {err!r} {err.args} " + "".join(
@@ -193,15 +214,30 @@ def test_a_generator_returning_the_wrong_type_is_a_payload_error():
 
 
 def test_a_blank_generation_is_a_payload_error():
-    err = failure(StubRetriever(), StubGenerator(result=Generation(text=" ", input_tokens=1, output_tokens=1)))
+    blank = Generation(text=" ", input_tokens=1, output_tokens=1)
+    err = failure_on_leaky_input(StubRetriever(result=[leaky_chunk()]), StubGenerator(result=blank))
     assert type(err) is ProviderPayloadError
+    assert_clean(err)
 
 
 def test_a_generation_that_bypassed_validation_is_a_payload_error():
-    bad = Generation.model_construct(text="ok", input_tokens=-5, output_tokens=1)
-    err = failure(StubRetriever(), StubGenerator(result=bad))
+    bad = Generation.model_construct(text="answer LEAK", input_tokens=-5, output_tokens=1)
+    err = failure_on_leaky_input(StubRetriever(result=[leaky_chunk()]), StubGenerator(result=bad))
     assert type(err) is ProviderPayloadError
     assert_clean(err)
+
+
+@pytest.mark.parametrize(
+    "boom", [RuntimeError("x"), ProviderError("rate limited"), ProviderPayloadError("truncated")]
+)
+def test_generator_failures_keep_the_query_and_context_out_of_captured_locals(boom):
+    err = failure_on_leaky_input(StubRetriever(result=[leaky_chunk()]), StubGenerator(error=boom))
+    assert_no_payload_in_pipeline_frames(err)
+
+
+def test_retriever_failures_keep_the_query_out_of_captured_locals():
+    err = failure_on_leaky_input(StubRetriever(error=RetrievalError("store down")), StubGenerator())
+    assert_no_payload_in_pipeline_frames(err)
 
 
 @pytest.mark.parametrize(
