@@ -20,8 +20,9 @@ def settings_for(collection):
         "QDRANT_URL": os.environ["QDRANT_URL"],
         "QDRANT_COLLECTION": collection,
     }
-    if os.environ.get("QDRANT_API_KEY"):
-        env["QDRANT_API_KEY"] = os.environ["QDRANT_API_KEY"]
+    for name in ("QDRANT_API_KEY", "RAG_EMBED_CACHE_DIR"):  # CI points the cache at the workspace
+        if os.environ.get(name):
+            env[name] = os.environ[name]
     return load_settings(env)
 
 

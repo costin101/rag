@@ -40,8 +40,11 @@ _SYSTEM = (
     "If the context does not contain the answer, say so plainly. Do not invent facts."
 )
 
-# The SDK reads these at construction; an ambient value could redirect the key to another
-# host or add headers/credentials. Config is the only source of settings (rule 4).
+# Stripped from the environment while the client is built (the SDK reads them at construction):
+# an ambient value could redirect the key to another host, or add headers or credentials. Only
+# these are handled. ANTHROPIC_OPEN_TELEMETRY* is handled by `open_telemetry=False` instead;
+# every other ANTHROPIC_* variable (e.g. ANTHROPIC_LOG) is left as is.
+# Config is the only source of settings (rule 4).
 _AMBIENT = (
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
@@ -108,6 +111,9 @@ class AnthropicProvider:
                 timeout=settings.RAG_PROVIDER_TIMEOUT_S,
                 max_retries=max_retries,
                 http_client=http_client,
+                # No spans, so queries and chunks never reach a tracer; also stops the SDK
+                # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.
+                open_telemetry=False,
             )
 
     def generate(self, query: str, chunks: Sequence[ContextChunk]) -> Generation:

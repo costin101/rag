@@ -626,3 +626,39 @@ def test_bad_qdrant_key_and_plain_http_url_are_reported_together():
     err = error_for(valid_env(QDRANT_URL="http://h.example.com", QDRANT_API_KEY="bad key"))
     assert "QDRANT_API_KEY" in str(err)
     assert "QDRANT_URL: must be https when QDRANT_API_KEY is set" in str(err)
+
+
+# --- embed endpoint (red team: ambient HF_ENDPOINT must not pick the download host) ---
+
+
+def test_embed_endpoint_defaults_to_the_public_hub():
+    assert load_settings(valid_env()).RAG_EMBED_ENDPOINT == "https://huggingface.co"
+
+
+def test_embed_endpoint_can_be_overridden_with_https():
+    s = load_settings(valid_env(RAG_EMBED_ENDPOINT="https://hub.example.com"))
+    assert s.RAG_EMBED_ENDPOINT == "https://hub.example.com"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "http://hub.example.com",
+        "ftp://hub.example.com",
+        "hub.example.com",
+        "https://TOKEN@hub.example.com",
+        "https://hub.example.com/?k=v",
+        "https://hub.example.com#frag",
+        "https://hub.example.com:abc",
+        "https://hub​.example.com",
+    ],
+)
+def test_invalid_embed_endpoint(bad):
+    err = error_for(valid_env(RAG_EMBED_ENDPOINT=bad))
+    assert "RAG_EMBED_ENDPOINT" in str(err)
+    assert "TOKEN" not in f"{err} {full_trace(err)}"
+
+
+def test_embed_endpoint_must_be_https_case_insensitively():
+    s = load_settings(valid_env(RAG_EMBED_ENDPOINT="HTTPS://hub.example.com"))
+    assert s.RAG_EMBED_ENDPOINT == "HTTPS://hub.example.com"

@@ -68,15 +68,18 @@ def _plain_floats(raw) -> list[float]:
 class FastEmbedder:
     """Host-side fastembed model, loaded at first use at the pinned revision.
 
-    `TextEmbedding` takes no revision, so the pinned snapshot is fetched with
-    `snapshot_download(revision=...)` and handed over as `specific_model_path`; a snapshot of any
-    other revision is never loaded.
+    `TextEmbedding` takes no revision, so the pinned revision is requested with
+    `snapshot_download(revision=...)` from the configured endpoint (`RAG_EMBED_ENDPOINT`, passed
+    explicitly, with `token=False`, so the ambient HF_ENDPOINT and HF_TOKEN are never used) and
+    handed over as `specific_model_path`. Known limit: the content hashes of the downloaded files
+    are not verified against anything beyond what the hub client does itself.
     """
 
     def __init__(self, settings: Settings):
         self._name = settings.RAG_EMBED_MODEL
         self._revision = settings.RAG_EMBED_REVISION
         self._cache_dir = settings.RAG_EMBED_CACHE_DIR
+        self._endpoint = settings.RAG_EMBED_ENDPOINT
         self._model = None
 
     def embed_query(self, text: str) -> list[float]:
@@ -143,10 +146,12 @@ class FastEmbedder:
                 revision=self._revision,
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
                 allow_patterns=patterns,
+                endpoint=self._endpoint,
+                token=False,  # never send an ambient HF_TOKEN
             )
         )
-        if snapshot.name != self._revision or not snapshot.is_dir():
-            raise _Unusable("the embedding model snapshot is not the pinned revision")
+        if not snapshot.is_dir():
+            raise _Unusable("the embedding model snapshot is missing")
         extra = {"cache_dir": str(self._cache_dir)} if self._cache_dir else {}
         return TextEmbedding(model_name=self._name, specific_model_path=str(snapshot), **extra)
 

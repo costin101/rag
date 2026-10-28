@@ -47,3 +47,21 @@ def test_conftest_fails_the_lane_when_integration_is_required():
     assert result.returncode != 0
     assert "RAG_REQUIRE_INTEGRATION=1" in result.stdout
     assert "skipped" not in result.stdout
+
+
+def test_integration_settings_pass_the_embed_cache_dir_through(monkeypatch, tmp_path):
+    from tests.test_integration_retrieval import settings_for
+
+    monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
+    monkeypatch.setenv("RAG_EMBED_CACHE_DIR", str(tmp_path))
+    assert settings_for("docs").RAG_EMBED_CACHE_DIR == tmp_path
+    monkeypatch.delenv("RAG_EMBED_CACHE_DIR")
+    assert settings_for("docs").RAG_EMBED_CACHE_DIR is None
+
+
+def test_ci_requires_the_integration_lane_against_a_pinned_qdrant():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert 'RAG_REQUIRE_INTEGRATION: "1"' in ci
+    assert "QDRANT_URL: http://localhost:6333" in ci
+    assert "RAG_EMBED_CACHE_DIR:" in ci
+    assert "image: qdrant/qdrant:v" in ci  # a released version tag, never latest

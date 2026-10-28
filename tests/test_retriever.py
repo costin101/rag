@@ -504,7 +504,7 @@ def test_retriever_repr_does_not_expose_keys():
     assert "LEAK" not in f"{r!r} {r.__dict__!r}" and "LEAK" not in str(vars(r))
 
 
-# --- FastEmbedder: the pinned revision is enforced at load time ----------------------
+# --- FastEmbedder: the pinned revision is requested from the configured endpoint -----
 
 
 def install_vendor(monkeypatch, tmp_path, *, models=None, revision_dir=None, embed=None):
@@ -578,11 +578,31 @@ def test_fast_embedder_without_cache_dir_passes_none(monkeypatch, tmp_path):
     assert calls.snapshot[0]["cache_dir"] is None
 
 
-def test_fast_embedder_rejects_a_snapshot_of_another_revision(monkeypatch, tmp_path):
-    calls, _ = install_vendor(monkeypatch, tmp_path, revision_dir="c" * 40)
-    err = failure_of(FastEmbedder(settings()).embed_query, "q")
-    assert err.code is ErrorCode.RETRIEVAL_FAILED
-    assert calls.text_embedding == []  # an unverified model is never loaded
+def test_fast_embedder_passes_the_configured_endpoint_and_no_token(monkeypatch, tmp_path):
+    calls, _ = install_vendor(monkeypatch, tmp_path)
+    FastEmbedder(settings(RAG_EMBED_ENDPOINT="https://hub.example.com")).embed_query("q")
+    (dl,) = calls.snapshot
+    assert dl["endpoint"] == "https://hub.example.com"
+    assert dl["token"] is False
+
+
+def test_fast_embedder_default_endpoint_is_the_public_hub(monkeypatch, tmp_path):
+    calls, _ = install_vendor(monkeypatch, tmp_path)
+    FastEmbedder(settings()).embed_query("q")
+    assert calls.snapshot[0]["endpoint"] == "https://huggingface.co"
+
+
+def test_ambient_hub_environment_does_not_change_the_download_call(monkeypatch, tmp_path):
+    calls, _ = install_vendor(monkeypatch, tmp_path)
+    FastEmbedder(settings()).embed_query("q")
+    monkeypatch.setenv("HF_ENDPOINT", "https://evil.invalid")
+    monkeypatch.setenv("HF_TOKEN", "LEAK-hf-token")
+    monkeypatch.setenv("HUGGING_FACE_HUB_TOKEN", "LEAK-hf-token")
+    ambient_calls, _ = install_vendor(monkeypatch, tmp_path / "again")
+    FastEmbedder(settings()).embed_query("q")
+    assert ambient_calls.snapshot == calls.snapshot
+    assert "evil.invalid" not in str(ambient_calls.snapshot)
+    assert "LEAK" not in str(ambient_calls.snapshot)
 
 
 def test_fast_embedder_rejects_a_snapshot_dir_that_is_missing(monkeypatch, tmp_path):

@@ -11,7 +11,13 @@ from retriever import QdrantRetriever, Retriever
 
 
 class ApiPath:
-    """Built once and reused, so the embedding model and clients load once per process."""
+    """Built once and reused, so the embedding model and clients load once per process.
+
+    Callers must build one `ApiPath` and reuse it: construction builds the provider (which
+    briefly strips ANTHROPIC_* variables from the process environment) and the retriever, whose
+    embedding model loads on first use. Building one per query repeats that every time, and
+    concurrent constructions would race on the environment. No locking is done here.
+    """
 
     def __init__(
         self,
@@ -29,5 +35,8 @@ class ApiPath:
 
 
 def answer_via_api(query: str, settings: Settings | None = None) -> RAGResponse:
-    """One-shot: settings from the environment unless given."""
+    """One-shot: settings from the environment unless given.
+
+    Builds a new `ApiPath` per call (model load included); a long-lived caller builds one itself.
+    """
     return ApiPath(settings if settings is not None else load_settings()).answer(query)

@@ -213,6 +213,19 @@ def test_environment_does_not_redirect_or_re_credential_the_client(monkeypatch):
     assert "x-evil" not in request.headers
 
 
+def test_telemetry_is_disabled_whatever_the_environment_says(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_OPEN_TELEMETRY", "true")
+    monkeypatch.setenv("ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE", "content")
+    monkeypatch.setenv("ANTHROPIC_OPEN_TELEMETRY_TRACES_MAX_CONTENT_BYTES", "99999")
+    provider = provider_for(Recorder())
+    assert provider._client.open_telemetry["traces"]["enabled"] is False
+    assert provider._client.open_telemetry["traces"].get("content_mode") != "content"
+
+
+def test_telemetry_is_disabled_by_default():
+    assert provider_for(Recorder())._client.open_telemetry["traces"]["enabled"] is False
+
+
 def test_environment_is_restored_after_construction(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://kept.invalid")
     provider_for(Recorder())

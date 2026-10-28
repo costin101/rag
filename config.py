@@ -45,6 +45,8 @@ TextField = Annotated[str, Field(min_length=1)]
 # pinned commit is that repo's. A different RAG_EMBED_MODEL must name its own revision.
 DEFAULT_EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 DEFAULT_EMBED_REVISION = "aa8f8b060edb00e03bfdd08813a2949946c8ba55"
+# Passed explicitly to the download so the ambient HF_ENDPOINT never picks the host.
+DEFAULT_EMBED_ENDPOINT = "https://huggingface.co"
 
 
 class Settings(BaseModel):
@@ -67,6 +69,7 @@ class Settings(BaseModel):
     RAG_EMBED_MODEL: TextField = DEFAULT_EMBED_MODEL
     RAG_EMBED_REVISION: TextField = Field(default=None, validate_default=True)
     RAG_EMBED_CACHE_DIR: Path | None = None
+    RAG_EMBED_ENDPOINT: str = DEFAULT_EMBED_ENDPOINT
 
     @field_validator("RAG_MAX_TOKENS", "RAG_PROVIDER_MAX_RETRIES", "RAG_TOP_K", mode="before")
     @classmethod
@@ -133,6 +136,16 @@ class Settings(BaseModel):
         if model != DEFAULT_EMBED_MODEL:
             raise ValueError("required when RAG_EMBED_MODEL is not the default model")
         return DEFAULT_EMBED_REVISION
+
+    @field_validator("RAG_EMBED_ENDPOINT")
+    @classmethod
+    def _https_endpoint(cls, url: str) -> str:
+        problem = url_problem(url, allow_query=False)
+        if problem:
+            raise ValueError(problem)
+        if not url.lower().startswith("https://"):
+            raise ValueError("must be an https URL")
+        return url
 
     @field_validator("QDRANT_URL")
     @classmethod
