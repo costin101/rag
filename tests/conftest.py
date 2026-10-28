@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from tests.gating import integration_decision
+from tests.gating import integration_decision, live_decision
 
 
 def pytest_collection_modifyitems(items):
@@ -14,6 +14,11 @@ def pytest_collection_modifyitems(items):
 
 
 def pytest_runtest_setup(item):
+    if item.get_closest_marker("live"):
+        verdict, reason = live_decision(os.environ)
+        if verdict != "run":
+            pytest.skip(reason if verdict == "skip" else None)
+        return
     if not item.get_closest_marker("integration"):
         return
     verdict, reason = integration_decision(os.environ)
