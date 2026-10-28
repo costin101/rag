@@ -247,8 +247,43 @@ def test_a_component_error_subclass_is_replaced_by_the_public_class_for_its_code
     assert_clean(rebuilt)
 
 
+class RaisingCodeError(RetrievalError):
+    @property
+    def code(self):
+        raise ValueError(f"{SECRET} LEAK")
+
+    @code.setter
+    def code(self, value):
+        pass
+
+
+class StrCodeError(RetrievalError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.code = "retrieval_failed"
+
+
+class StrSubclassMessage(str):
+    def __str__(self):
+        return "LEAK"
+
+
+class StrSubclassMessageError(RetrievalError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = StrSubclassMessage(message)
+
+
 @pytest.mark.parametrize(
-    "error", [NoSuperError("store down", "x"), BadCodeError("store down"), BadMessageError("store down")]
+    "error",
+    [
+        NoSuperError("store down", "x"),
+        BadCodeError("store down"),
+        BadMessageError("store down"),
+        RaisingCodeError("store down"),
+        StrCodeError("store down"),
+        StrSubclassMessageError("store down"),
+    ],
 )
 def test_a_malformed_component_error_becomes_the_stage_error_and_never_escapes_bare(error):
     rebuilt = failure_on_leaky_input(StubRetriever(error=error), StubGenerator())
@@ -373,3 +408,9 @@ def test_no_bare_exception_escapes_for_arbitrary_failures():
     ):
         with pytest.raises(RAGError):
             pipeline.answer("why?", retriever, generator)
+
+
+def test_every_error_code_maps_to_a_public_class_carrying_that_code():
+    assert set(pipeline._PUBLIC) == set(ErrorCode)
+    for code, error_type in pipeline._PUBLIC.items():
+        assert error_type("m").code is code

@@ -90,7 +90,7 @@ def _public(exc: RAGError, stage: str) -> RAGError:
     """
     try:
         code, message = exc.code, exc.message
-        if isinstance(code, ErrorCode) and isinstance(message, str):
+        if isinstance(code, ErrorCode) and type(message) is str:
             return _PUBLIC[code](message)
     except Exception:
         pass
