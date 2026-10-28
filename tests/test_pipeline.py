@@ -198,24 +198,68 @@ class DetailedRetrievalError(RetrievalError):
         super().__init__(message)
         self.detail = detail
 
-
-def test_a_component_error_subclass_with_its_own_constructor_is_rebuilt_cleanly():
-    error = DetailedRetrievalError("store down", f"{SECRET} LEAK")
-    rebuilt = failure(StubRetriever(error=error), StubGenerator())
-    assert rebuilt is not error
-    assert (type(rebuilt), rebuilt.code, rebuilt.message) == (DetailedRetrievalError, error.code, error.message)
-    assert_clean(rebuilt)
+    def __str__(self):
+        return f"{self.message} [{self.detail}]"
 
 
 class OSRetrievalError(RetrievalError, OSError):
-    """A RAGError subclass that also inherits a built-in with its own `__new__`."""
+    """Inherits a built-in with its own `__new__`."""
 
 
-def test_a_component_error_subclass_that_cannot_be_rebuilt_degrades_to_a_clean_rag_error():
-    error = OSRetrievalError("store down")
+class NewRetrievalError(RetrievalError):
+    def __new__(cls, message, detail):
+        return super().__new__(cls)
+
+    def __init__(self, message, detail):
+        super().__init__(message)
+
+
+class NoSuperError(RetrievalError):
+    def __init__(self, message, detail):
+        Exception.__init__(self, message)
+
+
+class BadCodeError(RetrievalError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.code = "custom"
+
+
+class BadMessageError(RetrievalError):
+    def __init__(self, message):
+        super().__init__(message)
+        self.message = 42
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        DetailedRetrievalError("store down", f"{SECRET} LEAK"),
+        OSRetrievalError("store down"),
+        NewRetrievalError("store down", "x"),
+    ],
+)
+def test_a_component_error_subclass_is_replaced_by_the_public_class_for_its_code(error):
     rebuilt = failure(StubRetriever(error=error), StubGenerator())
-    assert isinstance(rebuilt, RAGError)
-    assert (rebuilt.code, rebuilt.message) == (error.code, error.message)
+    assert type(rebuilt) is RetrievalError
+    assert (rebuilt.code, rebuilt.message) == (ErrorCode.RETRIEVAL_FAILED, "store down")
+    assert str(rebuilt) == "retrieval_failed: store down"
+    assert_clean(rebuilt)
+
+
+@pytest.mark.parametrize(
+    "error", [NoSuperError("store down", "x"), BadCodeError("store down"), BadMessageError("store down")]
+)
+def test_a_malformed_component_error_becomes_the_stage_error_and_never_escapes_bare(error):
+    rebuilt = failure_on_leaky_input(StubRetriever(error=error), StubGenerator())
+    assert type(rebuilt) is RetrievalError
+    assert rebuilt.message == "retrieval failed unexpectedly"
+    assert_clean(rebuilt)
+
+
+def test_a_malformed_generator_error_becomes_the_provider_stage_error():
+    rebuilt = failure(StubRetriever(), StubGenerator(error=NoSuperError("x", "y")))
+    assert type(rebuilt) is ProviderError and rebuilt.message == "generation failed unexpectedly"
     assert_clean(rebuilt)
 
 

@@ -4,15 +4,18 @@ Knows neither the vector store nor the provider: both arrive as interfaces. Late
 here so every path reports the same quantity. Callers see a `RAGResponse` or a `RAGError`; any
 other failure is converted to the `RAGError` for the stage it came from, with a fixed message
 and no cause, context or secret attached (the new error is raised outside the `except` block).
-A `RAGError` from a component is rebuilt the same way (same type, code and message), so no
-component frame, and none of its locals, rides along in the traceback.
+A `RAGError` from a component is rebuilt the same way as the public class for its code (message
+only; a malformed one becomes the stage's fixed error), so no component frame, none of its
+locals and none of its own subclass state rides along in the traceback.
 """
 
 from time import perf_counter
 
 from normalizer import (
+    ConfigError,
     ContextChunk,
     EmptyRetrievalError,
+    ErrorCode,
     InvalidQueryError,
     ProviderError,
     ProviderPayloadError,
@@ -30,6 +33,17 @@ _STAGES = {
     "retrieve": (RetrievalError, "retrieval failed unexpectedly"),
     "generate": (ProviderError, "generation failed unexpectedly"),
     "normalize": (ProviderPayloadError, "the generation could not be turned into a response"),
+}
+
+
+# code -> the public class callers see, whatever subclass a component raised.
+_PUBLIC = {
+    ErrorCode.CONFIG_INVALID: ConfigError,
+    ErrorCode.INVALID_QUERY: InvalidQueryError,
+    ErrorCode.RETRIEVAL_FAILED: RetrievalError,
+    ErrorCode.EMPTY_RETRIEVAL: EmptyRetrievalError,
+    ErrorCode.PROVIDER_FAILED: ProviderError,
+    ErrorCode.PROVIDER_PAYLOAD_INVALID: ProviderPayloadError,
 }
 
 
@@ -54,7 +68,7 @@ def answer(
     except RAGError as exc:
         # Rebuilt, not re-raised: the original traceback would carry the frames (and locals)
         # of whichever component raised it.
-        failure = _rebuilt(exc)
+        failure = _public(exc, stage)
     except Exception:
         error_type, message = _STAGES[stage]
         failure = error_type(message)
@@ -67,19 +81,21 @@ def answer(
     raise failure
 
 
-def _rebuilt(exc: RAGError) -> RAGError:
-    """Same type, code and message as `exc`, with no traceback, cause or context.
+def _public(exc: RAGError, stage: str) -> RAGError:
+    """The public error for `exc`: the class for its code, built from its message alone.
 
-    The subclass constructor is bypassed (a component's own RAGError subclass need not take
-    `(message)`). A type that cannot be built that way, e.g. one that also inherits a built-in
-    with its own `__new__`, degrades to the base `RAGError` with the same code and message.
+    A component's own subclass is never instantiated or returned, so its constructor, `__str__`
+    and extra state cannot fail or leak here. A code or message that is missing or malformed
+    degrades to the stage's fixed error.
     """
     try:
-        rebuilt = type(exc).__new__(type(exc))
-        RAGError.__init__(rebuilt, exc.code, exc.message)
+        code, message = exc.code, exc.message
+        if isinstance(code, ErrorCode) and isinstance(message, str):
+            return _PUBLIC[code](message)
     except Exception:
-        return RAGError(exc.code, exc.message)
-    return rebuilt
+        pass
+    error_type, fixed = _STAGES[stage]
+    return error_type(fixed)
 
 
 def _chunks(result) -> list[ContextChunk]:
