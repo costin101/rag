@@ -21,6 +21,7 @@ from normalizer import (
     ProviderPayloadError,
     RAGError,
 )
+import provider as provider_module
 from provider import AnthropicProvider, Provider, build_provider
 
 API_KEY = "test-not-a-key-LEAK-anthropic"
@@ -708,6 +709,77 @@ def test_provider_repr_hides_the_key():
     p = provider_for(Recorder())
     assert "LEAK" not in repr(p)
     assert "LEAK" not in str(p)
+
+
+# --- the private SDK members the client subclass depends on ----------------------
+
+
+class SdkStub:
+    """Stands in for the SDK client class; each subclass drops one thing provider.py relies on."""
+
+    def __init__(self, **kwargs):
+        self._custom_headers = dict(kwargs.get("default_headers") or {})
+
+    def _calculate_retry_timeout(self, *args, **kwargs):
+        return 0.0
+
+    def close(self):
+        pass
+
+
+class NoRetryTimeout(SdkStub):
+    _calculate_retry_timeout = None
+
+
+class NoCustomHeaders(SdkStub):
+    def __init__(self, **kwargs):
+        pass
+
+
+class IgnoresDefaultHeaders(SdkStub):
+    def __init__(self, **kwargs):
+        self._custom_headers = {}
+
+
+class RejectsOurArguments(SdkStub):
+    def __init__(self, *, api_key):
+        super().__init__()
+
+
+def test_the_real_sdk_passes_the_override_guard():
+    provider_for(Recorder())  # would raise ConfigError otherwise
+
+
+def test_a_sdk_that_still_has_both_members_passes_the_guard(monkeypatch):
+    monkeypatch.setattr(provider_module, "_SdkClient", SdkStub)
+    provider_module._require_sdk_overrides()
+
+
+@pytest.mark.parametrize(
+    "stub", [NoRetryTimeout, NoCustomHeaders, IgnoresDefaultHeaders, RejectsOurArguments]
+)
+def test_construction_fails_when_the_sdk_drops_an_overridden_member(monkeypatch, stub):
+    monkeypatch.setattr(provider_module, "_SdkClient", stub)
+    with pytest.raises(ConfigError) as excinfo:
+        AnthropicProvider(settings())
+    err = excinfo.value
+    assert "anthropic" in err.message
+    assert API_KEY not in err.message and "LEAK" not in err.message
+    assert err.__cause__ is None
+    assert err.__context__ is None
+
+
+def test_the_guard_probe_never_uses_the_network_or_the_key(monkeypatch):
+    seen = []
+
+    class Spy(SdkStub):
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(provider_module, "_SdkClient", Spy)
+    provider_module._require_sdk_overrides()
+    assert seen and all(API_KEY not in str(kw) for kw in seen)
 
 
 # --- factory -------------------------------------------------------------------

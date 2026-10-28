@@ -39,7 +39,46 @@ _SYSTEM = (
 )
 
 
-class _Client(anthropic.Anthropic):
+_SdkClient = anthropic.Anthropic
+_PROBE_HEADER = "x-rag-sdk-probe"
+
+
+def _sdk_overrides_hold() -> bool:
+    """True if the SDK client still has the private members `_Client` overrides.
+
+    Checked against a throwaway client built with fake arguments and never used to call out:
+    `_calculate_retry_timeout` must exist, and `__init__` must still store the default headers
+    it is given in `_custom_headers`. If either has moved, the retry-wait cap or the header
+    reset would silently stop working, so the provider refuses to be built instead.
+    """
+    if not callable(getattr(_SdkClient, "_calculate_retry_timeout", None)):
+        return False
+    probe = None
+    try:
+        probe = _SdkClient(
+            api_key="probe",
+            webhook_key="",
+            default_headers={_PROBE_HEADER: "1"},
+            open_telemetry=False,
+        )
+        return getattr(probe, "_custom_headers", {}).get(_PROBE_HEADER) == "1"
+    except Exception:
+        return False
+    finally:
+        if probe is not None:
+            probe.close()
+
+
+def _require_sdk_overrides() -> None:
+    # Raised outside any `except` block, so the error carries no cause or context.
+    if not _sdk_overrides_hold():
+        raise ConfigError(
+            "invalid configuration: anthropic SDK: unsupported version "
+            "(private client members changed)"
+        )
+
+
+class _Client(_SdkClient):
     """The SDK client with the environment's custom headers removed.
 
     The SDK merges ANTHROPIC_CUSTOM_HEADERS into the default headers at construction, whatever
@@ -50,6 +89,9 @@ class _Client(anthropic.Anthropic):
     retry-after-ms, or an HTTP date) up to ~49 days; `_calculate_retry_timeout` is the one place
     that value is computed for every retry, so capping it there bounds every sleep. The SDK has
     no public hook for this. `x-should-retry` only decides whether to retry, never how long.
+
+    Both overrides rely on private SDK members, so pyproject.toml pins the SDK to a minor
+    version and `AnthropicProvider` calls `_require_sdk_overrides` before building a client.
     """
 
     def __init__(self, *, max_retry_wait_s: float, **kwargs):
@@ -99,7 +141,8 @@ class AnthropicProvider:
 
     Construction writes no environment variable and no ANTHROPIC_* value changes the client
     (ANTHROPIC_LOG only sets SDK log verbosity), so it is safe to run while other threads
-    read the environment.
+    read the environment. It refuses to build on an SDK whose private members `_Client`
+    overrides have changed (see `_require_sdk_overrides`).
     """
 
     def __init__(
@@ -109,6 +152,7 @@ class AnthropicProvider:
         http_client: "httpx2.Client | None" = None,
         max_retries: int | None = None,
     ):
+        _require_sdk_overrides()
         self._model = settings.RAG_MODEL
         self._max_tokens = settings.RAG_MAX_TOKENS
         # An explicit argument (tests) wins; otherwise config decides, never the SDK default.

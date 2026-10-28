@@ -7,7 +7,8 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "pydantic>=2",
-    "anthropic",
+    # provider.py overrides private SDK members (_calculate_retry_timeout, _custom_headers); re-verify on any bump.
+    "anthropic>=2.3,<2.4",
     "qdrant-client[fastembed]",
     "huggingface_hub",
 ]
