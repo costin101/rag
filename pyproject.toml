@@ -7,6 +7,9 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "pydantic>=2",
+    "anthropic",
+    "qdrant-client[fastembed]",
+    "huggingface_hub",
 ]
 
 [project.optional-dependencies]
