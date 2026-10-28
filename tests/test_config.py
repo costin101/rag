@@ -464,3 +464,39 @@ def test_direct_construction_rejects_bool_and_float_for_int(name, bad):
 def test_direct_construction_accepts_native_numbers_and_numeric_strings():
     s = Settings(**DIRECT, RAG_TOP_K=7, QDRANT_TIMEOUT_S=2, RAG_MAX_TOKENS="9")
     assert (s.RAG_TOP_K, s.QDRANT_TIMEOUT_S, s.RAG_MAX_TOKENS) == (7, 2.0, 9)
+
+
+# --- text fields (review PR #17) ----------------------------------------------
+
+TEXT_FIELDS = ("RAG_MODEL", "QDRANT_COLLECTION", "RAG_EMBED_MODEL", "RAG_EMBED_REVISION")
+
+
+@pytest.mark.parametrize("name", TEXT_FIELDS)
+@pytest.mark.parametrize("bad", ["a\r\nX-Injected: 1", "a b", "a\x00b", "a​b"])
+def test_text_fields_reject_hidden_characters(name, bad):
+    err = error_for(valid_env(**{name: bad}))
+    assert name in str(err)
+    assert bad not in str(err)
+
+
+@pytest.mark.parametrize("name", TEXT_FIELDS)
+def test_text_fields_reject_empty_on_direct_construction(name):
+    values = {
+        "ANTHROPIC_API_KEY": API_KEY,
+        "QDRANT_URL": "http://localhost:6333",
+        "QDRANT_COLLECTION": "docs",
+        name: "",
+    }
+    with pytest.raises(ValidationError):
+        Settings(**values)
+
+
+@pytest.mark.parametrize("bad", ["../points", "a/b", "a?x=1", "a#b", "..", ".", "a..b", "a%2e"])
+def test_collection_rejects_path_unsafe_names(bad):
+    err = error_for(valid_env(QDRANT_COLLECTION=bad))
+    assert "QDRANT_COLLECTION" in str(err)
+
+
+@pytest.mark.parametrize("ok", ["docs", "my-docs_v2", "docs.v1", "Docs123"])
+def test_collection_accepts_plain_names(ok):
+    assert load_settings(valid_env(QDRANT_COLLECTION=ok)).QDRANT_COLLECTION == ok

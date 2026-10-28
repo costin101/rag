@@ -29,25 +29,30 @@ TimeoutS = Annotated[StrictFloat, Field(gt=0, le=600, allow_inf_nan=False)]
 _WHOLE = re.compile(r"[0-9]{1,9}")
 _DECIMAL = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9})?")
 
+# The collection name is interpolated into Qdrant REST paths: no separators, '..' or escapes.
+_COLLECTION = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
+
+TextField = Annotated[str, Field(min_length=1)]
+
 
 class Settings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     ANTHROPIC_API_KEY: SecretStr
     RAG_PROVIDER: Literal["anthropic"] = "anthropic"
-    RAG_MODEL: str = "claude-sonnet-5-5"
+    RAG_MODEL: TextField = "claude-sonnet-5-5"
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
     RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
     QDRANT_API_KEY: SecretStr | None = None
     QDRANT_URL: str
-    QDRANT_COLLECTION: str
+    QDRANT_COLLECTION: TextField
     QDRANT_TIMEOUT_S: TimeoutS = 10
 
     RAG_TOP_K: StrictInt = Field(default=5, ge=1, le=50)
-    RAG_EMBED_MODEL: str = "BAAI/bge-small-en-v1.5"
-    RAG_EMBED_REVISION: str | None = None
+    RAG_EMBED_MODEL: TextField = "BAAI/bge-small-en-v1.5"
+    RAG_EMBED_REVISION: TextField | None = None
     RAG_EMBED_CACHE_DIR: Path | None = None
 
     @field_validator("RAG_MAX_TOKENS", "RAG_TOP_K", mode="before")
@@ -77,6 +82,20 @@ class Settings(BaseModel):
                 raise ValueError("must not be empty")
             if has_hidden_chars(raw):
                 raise ValueError("must not contain whitespace or control characters")
+        return value
+
+    @field_validator("RAG_MODEL", "RAG_EMBED_MODEL", "RAG_EMBED_REVISION", "QDRANT_COLLECTION")
+    @classmethod
+    def _clean_text(cls, value: str | None) -> str | None:
+        if value is not None and has_hidden_chars(value):
+            raise ValueError("must not contain whitespace or control characters")
+        return value
+
+    @field_validator("QDRANT_COLLECTION")
+    @classmethod
+    def _collection_name(cls, value: str) -> str:
+        if not _COLLECTION.fullmatch(value):
+            raise ValueError("must contain only letters, digits, '_', '-' and inner '.'")
         return value
 
     @field_validator("RAG_EMBED_CACHE_DIR", mode="before")
