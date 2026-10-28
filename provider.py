@@ -45,12 +45,28 @@ class _Client(anthropic.Anthropic):
     The SDK merges ANTHROPIC_CUSTOM_HEADERS into the default headers at construction, whatever
     arguments it is given, so no argument can defeat it. The headers passed in are the only
     ones kept; this also holds for copies (`with_options`), which rebuild through `__init__`.
+
+    It also caps the wait before a retry. The SDK sleeps for the server's Retry-After (or
+    retry-after-ms, or an HTTP date) up to ~49 days; `_calculate_retry_timeout` is the one place
+    that value is computed for every retry, so capping it there bounds every sleep. The SDK has
+    no public hook for this. `x-should-retry` only decides whether to retry, never how long.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, max_retry_wait_s: float, **kwargs):
         explicit = dict(kwargs.get("default_headers") or {})
         super().__init__(**kwargs)
         self._custom_headers = explicit
+        self._max_retry_wait_s = max_retry_wait_s
+
+    def _calculate_retry_timeout(self, *args, **kwargs) -> float:
+        return min(super()._calculate_retry_timeout(*args, **kwargs), self._max_retry_wait_s)
+
+    def copy(self, *, _extra_kwargs=None, **kwargs):
+        # The SDK passes only its own arguments to the constructor; ours must ride along.
+        extra = {"max_retry_wait_s": self._max_retry_wait_s, **(_extra_kwargs or {})}
+        return super().copy(_extra_kwargs=extra, **kwargs)
+
+    with_options = copy
 
 
 class Provider(Protocol):
@@ -110,6 +126,7 @@ class AnthropicProvider:
             default_headers={},
             timeout=settings.RAG_PROVIDER_TIMEOUT_S,
             max_retries=max_retries,
+            max_retry_wait_s=settings.RAG_PROVIDER_MAX_RETRY_WAIT_S,
             http_client=http_client,
             # No spans, so queries and chunks never reach a tracer; also stops the SDK
             # reading ANTHROPIC_OPEN_TELEMETRY* from the environment.

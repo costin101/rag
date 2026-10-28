@@ -43,6 +43,7 @@ def test_minimal_env_applies_defaults():
     assert s.RAG_MAX_TOKENS == 1024
     assert s.RAG_PROVIDER_TIMEOUT_S == 30
     assert s.RAG_PROVIDER_MAX_RETRIES == 2
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == 60
     assert s.QDRANT_TIMEOUT_S == 10
     assert s.RAG_TOP_K == 5
     assert s.RAG_EMBED_MODEL == "BAAI/bge-small-en-v1.5"
@@ -63,6 +64,7 @@ def test_all_fields_overridable():
             RAG_MAX_TOKENS="256",
             RAG_PROVIDER_TIMEOUT_S="2.5",
             RAG_PROVIDER_MAX_RETRIES="4",
+            RAG_PROVIDER_MAX_RETRY_WAIT_S="7.5",
             QDRANT_TIMEOUT_S="1.5",
             RAG_TOP_K="7",
             RAG_EMBED_MODEL="some/embedder",
@@ -75,6 +77,7 @@ def test_all_fields_overridable():
     assert s.RAG_MAX_TOKENS == 256
     assert s.RAG_PROVIDER_TIMEOUT_S == 2.5
     assert s.RAG_PROVIDER_MAX_RETRIES == 4
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == 7.5
     assert s.QDRANT_TIMEOUT_S == 1.5
     assert s.RAG_TOP_K == 7
     assert s.RAG_EMBED_MODEL == "some/embedder"
@@ -184,7 +187,9 @@ def test_max_retries_bounds_inclusive(good):
     assert s.RAG_PROVIDER_MAX_RETRIES == int(good)
 
 
-@pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
+@pytest.mark.parametrize(
+    "name", ["RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S"]
+)
 @pytest.mark.parametrize(
     "bad",
     ["0", "-1", "abc", "nan", "inf", "-inf", "1_0", "1_0.5", "1e3", "1e0", "1e-1", "+5", "5.", ".5", "601"],
@@ -339,6 +344,7 @@ def test_bad_url_never_echoed_anywhere_in_traceback(url):
         ("RAG_MAX_TOKENS", "LEAK"),
         ("RAG_PROVIDER_MAX_RETRIES", "LEAK"),
         ("RAG_PROVIDER_TIMEOUT_S", "LEAK"),
+        ("RAG_PROVIDER_MAX_RETRY_WAIT_S", "LEAK"),
         ("QDRANT_TIMEOUT_S", "LEAK"),
         ("RAG_PROVIDER", "LEAK"),
         ("RAG_EMBED_CACHE_DIR", "LEAK\x00"),
@@ -424,6 +430,12 @@ def test_plain_decimal_timeouts_accepted(good):
     assert load_settings(valid_env(QDRANT_TIMEOUT_S=good)).QDRANT_TIMEOUT_S == float(good)
 
 
+@pytest.mark.parametrize("good", ["0.5", "2", "30.25"])
+def test_plain_decimal_retry_wait_accepted(good):
+    s = load_settings(valid_env(RAG_PROVIDER_MAX_RETRY_WAIT_S=good))
+    assert s.RAG_PROVIDER_MAX_RETRY_WAIT_S == float(good)
+
+
 # --- upper bounds ------------------------------------------------------------
 
 
@@ -431,7 +443,9 @@ def test_max_tokens_upper_bound_inclusive():
     assert load_settings(valid_env(RAG_MAX_TOKENS="200000")).RAG_MAX_TOKENS == 200000
 
 
-@pytest.mark.parametrize("name", ["RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S"])
+@pytest.mark.parametrize(
+    "name", ["RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S"]
+)
 def test_timeout_upper_bound_inclusive(name):
     assert getattr(load_settings(valid_env(**{name: "600"})), name) == 600
     assert name in str(error_for(valid_env(**{name: "600.01"})))
@@ -521,6 +535,7 @@ DIRECT = {
         ("RAG_PROVIDER_MAX_RETRIES", True),
         ("RAG_PROVIDER_MAX_RETRIES", 2.0),
         ("RAG_PROVIDER_TIMEOUT_S", True),
+        ("RAG_PROVIDER_MAX_RETRY_WAIT_S", True),
         ("QDRANT_TIMEOUT_S", True),
         ("QDRANT_TIMEOUT_S", False),
     ],
@@ -606,6 +621,7 @@ def test_settings_reject_unknown_fields_on_direct_construction():
 def test_timeout_defaults_are_floats():
     s = load_settings(valid_env())
     assert isinstance(s.RAG_PROVIDER_TIMEOUT_S, float)
+    assert isinstance(s.RAG_PROVIDER_MAX_RETRY_WAIT_S, float)
     assert isinstance(s.QDRANT_TIMEOUT_S, float)
 
 

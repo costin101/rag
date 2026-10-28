@@ -60,6 +60,8 @@ class Settings(BaseModel):
     RAG_MAX_TOKENS: StrictInt = Field(default=1024, gt=0, le=200_000)
     RAG_PROVIDER_TIMEOUT_S: TimeoutS = 30.0
     RAG_PROVIDER_MAX_RETRIES: StrictInt = Field(default=2, ge=0, le=10)
+    # Longest the SDK may sleep before one retry, whatever Retry-After the server sends.
+    RAG_PROVIDER_MAX_RETRY_WAIT_S: TimeoutS = 60.0
     RAG_PROVIDER_BASE_URL: str = DEFAULT_PROVIDER_BASE_URL
 
     # Declared before QDRANT_URL so its validator can see whether a key is set.
@@ -83,7 +85,9 @@ class Settings(BaseModel):
             return int(value)
         return value
 
-    @field_validator("RAG_PROVIDER_TIMEOUT_S", "QDRANT_TIMEOUT_S", mode="before")
+    @field_validator(
+        "RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S", mode="before"
+    )
     @classmethod
     def _decimal_number(cls, value):
         if isinstance(value, str):
