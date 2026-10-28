@@ -10,6 +10,9 @@ from normalizer import ErrorCode, RAGError
 API_KEY = "test-not-a-key-anthropic"
 QDRANT_KEY = "test-not-a-key-qdrant"
 
+PIN_A = "a" * 40
+PIN_B = "b" * 40
+
 REQUIRED = ("ANTHROPIC_API_KEY", "QDRANT_URL", "QDRANT_COLLECTION")
 
 
@@ -61,7 +64,7 @@ def test_all_fields_overridable():
             RAG_TOP_K="7",
             RAG_EMBED_MODEL="some/embedder",
             RAG_EMBED_CACHE_DIR="/tmp/embed-cache",
-            RAG_EMBED_REVISION="abc123",
+            RAG_EMBED_REVISION=PIN_A,
         )
     )
     assert s.QDRANT_API_KEY.get_secret_value() == QDRANT_KEY
@@ -72,7 +75,7 @@ def test_all_fields_overridable():
     assert s.RAG_TOP_K == 7
     assert s.RAG_EMBED_MODEL == "some/embedder"
     assert s.RAG_EMBED_CACHE_DIR == Path("/tmp/embed-cache")
-    assert s.RAG_EMBED_REVISION == "abc123"
+    assert s.RAG_EMBED_REVISION == PIN_A
 
 
 def test_unrelated_env_vars_are_filtered_out_before_validation():
@@ -366,8 +369,8 @@ def test_embed_revision_required_for_non_default_model():
     assert "RAG_EMBED_REVISION" in str(err)
     assert "some/embedder" not in str(err)
     assert load_settings(
-        valid_env(RAG_EMBED_MODEL="some/embedder", RAG_EMBED_REVISION="abc123")
-    ).RAG_EMBED_REVISION == "abc123"
+        valid_env(RAG_EMBED_MODEL="some/embedder", RAG_EMBED_REVISION=PIN_A)
+    ).RAG_EMBED_REVISION == PIN_A
 
 
 def test_embed_revision_required_on_direct_construction_for_non_default_model():
@@ -381,8 +384,8 @@ def test_embed_revision_required_on_direct_construction_for_non_default_model():
 
 
 def test_embed_revision_can_override_the_default():
-    assert load_settings(valid_env(RAG_EMBED_REVISION="abc123")).RAG_EMBED_REVISION == "abc123"
-    assert load_settings(valid_env(RAG_EMBED_REVISION=" deadbeef ")).RAG_EMBED_REVISION == "deadbeef"
+    assert load_settings(valid_env(RAG_EMBED_REVISION=PIN_A)).RAG_EMBED_REVISION == PIN_A
+    assert load_settings(valid_env(RAG_EMBED_REVISION=f" {PIN_B} ")).RAG_EMBED_REVISION == PIN_B
 
 
 @pytest.mark.parametrize("good", ["0.5", "2", "30.25"])
@@ -571,3 +574,22 @@ def test_timeout_defaults_are_floats():
     s = load_settings(valid_env())
     assert isinstance(s.RAG_PROVIDER_TIMEOUT_S, float)
     assert isinstance(s.QDRANT_TIMEOUT_S, float)
+
+
+@pytest.mark.parametrize("bad", ["main", "v1.0", "abc123", "A" * 40, "a" * 39, "a" * 41, "g" * 40])
+def test_embed_revision_rejects_non_commit_values(bad):
+    err = error_for(valid_env(RAG_EMBED_MODEL="some/embedder", RAG_EMBED_REVISION=bad))
+    assert "RAG_EMBED_REVISION: must be a 40-character lowercase hex commit hash" in str(err)
+    assert bad not in str(err)
+
+
+def test_invalid_embed_model_does_not_add_a_revision_error():
+    err = error_for(valid_env(RAG_EMBED_MODEL="a b"))
+    assert "RAG_EMBED_MODEL" in str(err)
+    assert "RAG_EMBED_REVISION" not in str(err)
+
+
+def test_bad_qdrant_key_and_plain_http_url_are_reported_together():
+    err = error_for(valid_env(QDRANT_URL="http://h.example.com", QDRANT_API_KEY="bad key"))
+    assert "QDRANT_API_KEY" in str(err)
+    assert "QDRANT_URL: must be https when QDRANT_API_KEY is set" in str(err)

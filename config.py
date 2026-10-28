@@ -28,6 +28,9 @@ TimeoutS = Annotated[StrictFloat, Field(gt=0, le=600, allow_inf_nan=False)]
 # API keys travel in HTTP headers, so they must be printable ASCII.
 _ASCII_KEY = re.compile(r"[\x21-\x7e]+")
 
+# A pinned revision is a full commit hash: branches and tags can move.
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+
 # Env numbers are plain decimals only: no signs, underscores, exponents or non-ASCII digits.
 _WHOLE = re.compile(r"[0-9]{1,9}")
 _DECIMAL = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9})?")
@@ -120,6 +123,8 @@ class Settings(BaseModel):
     @classmethod
     def _pinned_revision(cls, value, info: ValidationInfo):
         if value is not None:
+            if isinstance(value, str) and not _COMMIT.fullmatch(value):
+                raise ValueError("must be a 40-character lowercase hex commit hash")
             return value
         model = info.data.get("RAG_EMBED_MODEL")
         if model is None:  # the model itself failed validation; that error is reported
@@ -157,6 +162,17 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     try:
         return Settings.model_validate(values)
     except ValidationError as exc:
-        problems = "; ".join(f"{e['loc'][0]}: {_reason(e)}" for e in exc.errors())
+        found = [f"{e['loc'][0]}: {_reason(e)}" for e in exc.errors()]
+        # A key that failed validation never reaches the https check; report both together.
+        url = values.get("QDRANT_URL")
+        if (
+            any(m.startswith("QDRANT_API_KEY:") for m in found)
+            and not any(m.startswith("QDRANT_URL:") for m in found)
+            and isinstance(url, str)
+            and not url_problem(url, allow_query=False)
+            and not url.lower().startswith("https://")
+        ):
+            found.append("QDRANT_URL: must be https when QDRANT_API_KEY is set")
+        problems = "; ".join(found)
     # Raised outside the except block so the error carries no __context__ to trace back.
     raise ConfigError(f"invalid configuration: {problems}")
