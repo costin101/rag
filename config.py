@@ -151,28 +151,34 @@ def _reason(error) -> str:
     return error["msg"].removeprefix("Value error, ")
 
 
-def load_settings(env: Mapping[str, str] | None = None) -> Settings:
-    """Build Settings from `env` (default: os.environ); blank values count as unset."""
-    source = os.environ if env is None else env
+def _validate(source: Mapping[str, str]) -> tuple[Settings | None, str]:
+    """Return (settings, "") or (None, problems); secrets stay in this frame, never in a raise."""
     values = {
         name: source[name].strip()
         for name in Settings.model_fields
         if name in source and source[name].strip()
     }
     try:
-        return Settings.model_validate(values)
+        return Settings.model_validate(values), ""
     except ValidationError as exc:
         found = [f"{e['loc'][0]}: {_reason(e)}" for e in exc.errors()]
-        # A key that failed validation never reaches the https check; report both together.
-        url = values.get("QDRANT_URL")
-        if (
-            any(m.startswith("QDRANT_API_KEY:") for m in found)
-            and not any(m.startswith("QDRANT_URL:") for m in found)
-            and isinstance(url, str)
-            and not url_problem(url, allow_query=False)
-            and not url.lower().startswith("https://")
-        ):
-            found.append("QDRANT_URL: must be https when QDRANT_API_KEY is set")
-        problems = "; ".join(found)
-    # Raised outside the except block so the error carries no __context__ to trace back.
-    raise ConfigError(f"invalid configuration: {problems}")
+    # A key that failed validation never reaches the https check; report both together.
+    url = values.get("QDRANT_URL")
+    if (
+        any(m.startswith("QDRANT_API_KEY:") for m in found)
+        and not any(m.startswith("QDRANT_URL:") for m in found)
+        and isinstance(url, str)
+        and not url_problem(url, allow_query=False)
+        and not url.lower().startswith("https://")
+    ):
+        found.append("QDRANT_URL: must be https when QDRANT_API_KEY is set")
+    return None, "; ".join(found)
+
+
+def load_settings(env: Mapping[str, str] | None = None) -> Settings:
+    """Build Settings from `env` (default: os.environ); blank values count as unset."""
+    settings, problems = _validate(os.environ if env is None else env)
+    if settings is None:
+        # No secret-bearing local here, so traceback locals capture cannot reach a key.
+        raise ConfigError(f"invalid configuration: {problems}")
+    return settings

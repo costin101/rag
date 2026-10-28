@@ -1,3 +1,4 @@
+import os
 import traceback
 from pathlib import Path
 
@@ -277,6 +278,21 @@ def test_secret_values_never_in_error():
     err = error_for(env)
     text = f"{err} {err!r} {err.args} {full_trace(err)}"
     assert "LEAK" not in text
+
+
+def test_secrets_not_reachable_from_traceback_locals(monkeypatch):
+    # Locals-capturing reporters (Sentry, rich show_locals, pytest --showlocals) walk the frames.
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key-LEAK-anthropic")
+    monkeypatch.setenv("QDRANT_URL", "http://q.example.com")
+    monkeypatch.setenv("QDRANT_COLLECTION", "docs")
+    monkeypatch.setenv("QDRANT_API_KEY", "test-not-a-key-LEAK-qdrant")
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings()
+    trace = traceback.TracebackException.from_exception(excinfo.value, capture_locals=True)
+    assert "LEAK" not in "".join(trace.format())
+    assert os.environ["ANTHROPIC_API_KEY"]  # the env was really populated
 
 
 def test_error_carries_no_exception_context():
