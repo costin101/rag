@@ -31,4 +31,4 @@ Queries and retrieved chunk text are sent to the Anthropic API (`RAG_PROVIDER_BA
 
 ## Usage
 
-`python main.py "your question"` prints one `RAGResponse` JSON document; a failure exits 1 with a final `<code>: <message>` line on stderr (hub download progress or warnings may precede it) (usage errors exit 2). Configuration comes from the environment (see `.env.example`).
+`python main.py "your question"` (API path) or `python main.py --path container "your question"` (an ephemeral Nomad session container, needs `NOMAD_ADDR` and `RAG_CONTAINER_IMAGE`) prints one `RAGResponse` JSON document; a failure exits 1 with a final `<code>: <message>` line on stderr (hub download progress or warnings may precede it) (usage errors exit 2). Configuration comes from the environment (see `.env.example`).
