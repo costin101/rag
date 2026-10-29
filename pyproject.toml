@@ -29,5 +29,6 @@ testpaths = ["tests"]
 addopts = "--disable-socket"
 markers = [
     "integration: needs a real Qdrant (QDRANT_URL)",
+    "nomad: also needs a real Nomad agent and the built image (NOMAD_ADDR, RAG_CONTAINER_IMAGE); run the rest with -m \"integration and not nomad\"",
     "live: calls the real Anthropic API (RAG_LIVE_ANTHROPIC=1)",
 ]

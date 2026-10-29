@@ -23,3 +23,14 @@ def live_decision(env: Mapping[str, str]) -> tuple[str, str]:
     if not env.get("ANTHROPIC_API_KEY", "").strip():
         return "skip", "ANTHROPIC_API_KEY is not set"
     return integration_decision(env)
+
+
+def nomad_decision(env: Mapping[str, str]) -> tuple[str, str]:
+    """('run' | 'skip' | 'fail', reason) for a `nomad` test: it needs a real agent and the image."""
+    missing = [n for n in ("NOMAD_ADDR", "RAG_CONTAINER_IMAGE") if not env.get(n, "").strip()]
+    if not missing:
+        return "run", ""
+    reason = f"{' and '.join(missing)} not set; the nomad lane needs a real agent and the built image"
+    if env.get("RAG_REQUIRE_INTEGRATION") == "1":
+        return "fail", f"{reason} but RAG_REQUIRE_INTEGRATION=1"
+    return "skip", reason
