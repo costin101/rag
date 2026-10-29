@@ -12,12 +12,22 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Real vector store for the integration lane (tests/test_integration_retrieval.py).
+    timeout-minutes: 30
+    # Real vector store for the integration lane (tests/test_integration_retrieval.py), and a
+    # registry the Nomad agent pulls the session image from (tests/test_integration_container_path.py).
     services:
       qdrant:
         image: qdrant/qdrant:v1.20.0
         ports:
           - 6333:6333
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    env:
+      NOMAD_VERSION: "2.0.7"
+      # SHA256 of nomad_2.0.7_linux_amd64.zip from releases.hashicorp.com/nomad/2.0.7/nomad_2.0.7_SHA256SUMS.
+      NOMAD_SHA256: 4c9b8a0850d6fd9caadbbab09b3e6fdf8b77aa777729543c70c61b85acca68c1
     steps:
       # Major-tag pins (not full SHAs); revisit with Dependabot/Renovate.
       - uses: actions/checkout@v7
@@ -49,12 +59,62 @@ jobs:
           done
           echo "Qdrant did not become ready" >&2
           exit 1
+      - name: Build and push the session image
+        # RAG_CONTAINER_IMAGE is the pushed digest, never a tag: the agent runs exactly this build.
+        run: |
+          docker build -t 127.0.0.1:5000/rag-session:ci .
+          docker push 127.0.0.1:5000/rag-session:ci
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' 127.0.0.1:5000/rag-session:ci)
+          echo "RAG_CONTAINER_IMAGE=$digest" >> "$GITHUB_ENV"
+      - name: Check the session image
+        run: |
+          docker run --rm --entrypoint python "$RAG_CONTAINER_IMAGE" -c "
+          import importlib.util as u, sys
+          found = [m for m in ('fastembed', 'onnxruntime', 'qdrant_client', 'anthropic', 'pydantic') if u.find_spec(m)]
+          sys.exit(f'image ships {found}' if found else 0)"
+          docker inspect --format '{{json .Config.Env}}' "$RAG_CONTAINER_IMAGE" | python -c "
+          import json, re, sys
+          names = [e.split('=', 1)[0] for e in json.load(sys.stdin)]
+          bad = [n for n in names if re.search('KEY|TOKEN|SECRET|PASSWORD', n, re.I)]
+          sys.exit(f'secret-looking env in the image: {bad}' if bad else 0)"
+          test "$(docker inspect --format '{{.Config.User}}' "$RAG_CONTAINER_IMAGE")" = "65532"
+      - name: Install Nomad
+        run: |
+          curl -sSfLO "https://releases.hashicorp.com/nomad/${NOMAD_VERSION}/nomad_${NOMAD_VERSION}_linux_amd64.zip"
+          echo "${NOMAD_SHA256}  nomad_${NOMAD_VERSION}_linux_amd64.zip" | sha256sum -c -
+          unzip -o "nomad_${NOMAD_VERSION}_linux_amd64.zip" nomad
+          sudo install -m 0755 nomad /usr/local/bin/nomad
+          nomad version
+      - name: Start the Nomad dev agent
+        run: |
+          sudo nohup nomad agent -dev -bind=127.0.0.1 > nomad-agent.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:4646/v1/nodes | grep -q '"Status":"ready"' && break
+            sleep 2
+          done
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4646/v1/nodes | python -c "
+          import json, sys
+          nodes = json.load(sys.stdin)
+          sys.exit(0 if nodes and nodes[0]['Drivers']['docker']['Healthy'] else 1)" && exit 0
+            sleep 2
+          done
+          echo "docker driver not healthy" >&2
+          exit 1
       - name: Test
-        # RAG_REQUIRE_INTEGRATION=1: a missing Qdrant fails the build instead of skipping the lane.
+        # RAG_REQUIRE_INTEGRATION=1: a missing Qdrant or Nomad agent fails the build instead of
+        # skipping the lane. RAG_CONTAINER_IMAGE comes from the build step above.
         run: pytest
         env:
           QDRANT_URL: http://localhost:6333
+          NOMAD_ADDR: http://127.0.0.1:4646
           RAG_REQUIRE_INTEGRATION: "1"
           RAG_EMBED_CACHE_DIR: ${{ github.workspace }}/.embed-cache
       - name: Audit runtime dependencies
         run: pip-audit -r requirements.lock
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: nomad-agent-log
+          path: nomad-agent.log
+          if-no-files-found: ignore
