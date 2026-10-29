@@ -9,7 +9,7 @@ Zone: `rag` (python, TDD). Rules in play: 1 (single response contract), 2 (bound
 
 ## Decisions taken in this design (from consults; open to the design gate)
 - `pipeline.py` is unchanged. A `ContainerError` raised inside `generate` becomes the fixed `ProviderError` there; callers keep seeing only `RAGResponse` or `RAGError` (rules 1, 3). Tests target `ContainerSession`/`NomadGenerator`/`parse_container_output` directly. The component that wants the raw `ContainerError` as a fallback trigger is the router/session wrapper of #12, which catches it before the pipeline.
-- No `--path` flag and no new CLI error line in `main.py` (a path switch is routing, #12; a new public code breaks the closed `ErrorCode` set). The container path is proven by `ContainerPath` in the integration test.
+- ~~No `--path` flag in `main.py`~~ **Superseded 2026-10-29 by the tech lead (costin101)**: `main.py [--path api|container] QUERY` ships in #8 so a container session is runnable from the CLI. The default stays the API path; `--path` is an explicit operator choice, not routing (automatic path choice and fallback stay #12). No new CLI error line and no new public `ErrorCode`: container failures print the existing fixed lines. #12 will own whether `--path` survives next to routing.
 - Signal/crash purge stays in #11; a `kill -9` leaks a job until then (accepted risk, owner #10/#11).
 
 ## Shape
@@ -57,6 +57,17 @@ Batch, one group, `Count=1`, restart `Attempts=0 Mode=fail`, reschedule `Attempt
 - Integration (`nomad` marker; skip when unset, fail under `RAG_REQUIRE_INTEGRATION=1`): real agent and image, one query through `ContainerPath` on seeded Qdrant; assert contract; record the registered id and assert it existed during the run, then `GET /v1/job/<id>` is 404 and no non-terminal allocation remains; bad-image failure still purges; a probe task shows the running task has no network; autouse teardown sweeps `rag-session-*` jobs and fails if any remain; an image that prints constant valid JSON fails the derived-answer assertion.
 - CI: `registry:2` service container, build and push the image, read the digest, pin it; image checks (`find_spec('fastembed'/'onnxruntime') is None`, no secret env vars); install Nomad with a SHA256 hardcoded in the workflow; `sudo nomad agent -dev -bind=127.0.0.1` in the background, wait for health, node `ready` and docker driver `Healthy`; `timeout-minutes`; agent log uploaded on failure.
 
+## Priorities (tech lead, 2026-10-29)
+- Priority is a functional Nomad - Docker - CLI session. The deadline bound on a session (review of PR #25, red-team claim 7: register and the purge sit outside the deadline, worst case about 16x `RAG_CONTAINER_TIMEOUT_S`) is explicitly deprioritized and moves to a follow-up; it is not a merge condition for #8.
+- New requirement, **not yet scoped**: the CLI must be reachable from a web session in a browser. This is a different deliverable from #8 (a network-facing service plus a browser client, with session identity, auth and abuse limits) and is tracked as a separate story, not built in #8.
+  - **Shape (decided 2026-10-29, tech lead costin101)**: an HTTP service with a query endpoint that returns the same `RAGResponse` (rules 1 and 3: the container-or-API choice stays server-side, the browser never branches on it) plus a small static page that calls it. A terminal-in-browser (websocket to a session container) is rejected: it exposes a shell-like surface and needs its own threat model.
+- Remaining open questions for that story's design:
+  - Session mapping: one browser session = one container session (rules 2, 3 and #9 reuse), with an idle TTL and purge on disconnect (#11 signals/TTL).
+  - Auth and tenancy: who may open a session, per-user limits against `max_containers` (#10), and what happens to an unauthenticated visitor when the pool is full (API fallback costs money).
+  - Data: queries and chunks sit in the job spec until purge (see Risks); a web surface widens who can send them.
+  - Hosting: Nomad agent and vector store stay external (CLAUDE.md); where the web service runs is out of scope until decided.
+  - Dependencies: #9 (reuse), #10 (cap), #11 (TTL and signals), #12 (routing and fallback) come first; the web story builds on them.
+
 ## Stacked PRs
 0. Spike (throwaway, first): a CI job that starts the dev agent and registry, registers the hardened job, reads logs, purges, and records the real responses (log framing, `FailedTGAllocs`, per-alloc GC, stdout at task death, template into `local/` under `readonly_rootfs`/`cap_drop`) as fixtures for `tests/fake_nomad.py`. The fake is built from these recordings, not from assumptions.
 1. `ContainerError`, `parse_container_output`, `container/entrypoint.py`, `Dockerfile`, config fields, `httpx` dependency and relock, `build_job`, tests.
@@ -69,6 +80,7 @@ Batch, one group, `Count=1`, restart `Attempts=0 Mode=fail`, reschedule `Attempt
 - Nomad dev agent + docker driver on macOS may not fingerprint reliably: CI is the proof, local run is best effort.
 - Query and chunks sit in the job spec while the job exists (Nomad API, Raft until compaction); `local/input.json` is deleted by the entrypoint, logs persist until client GC. A Nomad Variable instead of the embedded template is the upgrade path.
 - Leaked jobs after `kill -9` or SIGTERM until #11; no sweeper in #8.
+- Follow-ups from the PR #25 review, accepted for #8 and tracked outside it: session deadline bound (above); stdout-read deadline test; real-agent timeout/long-run purge test via `GET /v1/allocation/<id>`; `NOMAD_CACERT` load check at `ContainerPath` construction (`ConfigError`); clear the job body in `run` on a register failure so captured tracebacks do not carry the query.
 - A container-only CLI run still needs `ANTHROPIC_API_KEY` set (config unchanged).
 - API behaviour of Nomad (alloc logs, per-alloc GC, eval failure fields) is from consultant knowledge; verified for the first time by the integration lane.
 - Story size (about 8 files, CI, docs): kept as one story in three stacked PRs, as #7.
