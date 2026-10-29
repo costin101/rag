@@ -7,7 +7,8 @@ import uuid
 import pytest
 
 from config import load_settings
-from nomad_client import build_job
+from container_session import _POLL_S, _PURGE_POLLS
+from nomad_client import KILL_TIMEOUT_S, build_job
 from normalizer import ContainerError, ContextChunk
 
 DIGEST = "b" * 64
@@ -293,3 +294,9 @@ def test_two_builds_for_different_ids_differ_only_in_the_id():
     assert a["Job"]["ID"] != b["Job"]["ID"]
     a["Job"]["ID"] = a["Job"]["Name"] = b["Job"]["ID"] = b["Job"]["Name"] = "same"
     assert a == b
+
+
+def test_the_task_kill_timeout_is_explicit_and_shorter_than_the_stop_wait():
+    _, _, task = parts(spec())
+    assert task["KillTimeout"] == KILL_TIMEOUT_S * 1_000_000_000
+    assert (_PURGE_POLLS - 1) * _POLL_S > KILL_TIMEOUT_S  # the last read still lands after the kill

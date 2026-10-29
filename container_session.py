@@ -13,10 +13,11 @@ import uuid
 from collections.abc import Callable, Sequence
 
 from config import Settings
-from nomad_client import NomadClient, build_job
+from nomad_client import KILL_TIMEOUT_S, NomadClient, build_job
 from normalizer import ContainerError, ContextChunk
 
-# How often the allocation is read, and how many reads the stop waits for it to end.
+# How often the allocation is read, and how many reads the stop waits for it to end (longer
+# than the task's kill timeout, or a task that ignores SIGTERM is purged while still running).
 _POLL_S = 0.5
 _PURGE_POLLS = 10
 

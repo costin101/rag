@@ -28,3 +28,5 @@ Scenarios: `ok` (exit 0), `exit3` (valid JSON, exit 3), `badimage` (pull fails),
   job's allocations are `[]`. `PUT /v1/client/allocation/<id>/gc` gives 200 with an empty body.
 - The dev agent has no ACLs and only the `default` namespace, so token and namespace behaviour
   is not covered by these recordings.
+
+No response was recorded for `DELETE /v1/job/<id>` without `purge` (the stop); `tests/fake_nomad.py` answers it with the recorded `*-deregister` response, which has the same shape.

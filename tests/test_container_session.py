@@ -238,7 +238,7 @@ def test_the_job_is_stopped_then_waited_on_then_purged():
     stop, purge = [r for r in fake.requests if r.method == "DELETE"]
     between = [r for r in fake.requests[fake.requests.index(stop) : fake.requests.index(purge)] if r.method == "GET"]
     assert fake.reads_after_stop == 3  # two running reads, then the terminal one
-    assert len(fake.calls("allocations")) >= 3 and len(between) == 3
+    assert len(between) == 3
     assert_purged_once(fake)
 
 

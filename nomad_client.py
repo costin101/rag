@@ -37,6 +37,9 @@ _READ_CHUNK_BYTES = 8192
 _USER = "65532"
 _PIDS_LIMIT = 64
 _EPHEMERAL_DISK_MB = 50
+# The stop waits for the task to die, and the image's PID 1 ignores SIGTERM: Nomad's default
+# 5 s would outlast the session's wait, so the kill is explicit and shorter.
+KILL_TIMEOUT_S = 1
 _TASK = "gen"
 _INPUT_PATH = "local/input.json"
 
@@ -79,6 +82,7 @@ def build_job(
                         "Name": _TASK,
                         "Driver": "docker",
                         "User": _USER,
+                        "KillTimeout": KILL_TIMEOUT_S * 1_000_000_000,
                         "Config": {
                             "image": settings.RAG_CONTAINER_IMAGE,
                             # No group-level Networks block: next to this it fails every

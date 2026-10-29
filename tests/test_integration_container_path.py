@@ -111,6 +111,15 @@ class SpyClient(NomadClient):
         super().deregister(job_id)
 
 
+class SleepingClient(SpyClient):
+    """Registers a job whose task never answers, so the run ends on the deadline mid-run."""
+
+    def register(self, body):
+        config = body["Job"]["TaskGroups"][0]["Tasks"][0]["Config"]
+        config["entrypoint"] = ["python", "-I", "-c", "import time; time.sleep(600)"]
+        super().register(body)
+
+
 @pytest.fixture(autouse=True)
 def no_session_job_survives():
     """Sweep: every `rag-session-*` job is gone after each test, or the test fails."""
@@ -217,3 +226,18 @@ def test_the_running_task_has_no_network_and_a_read_only_root(collection):
         client.deregister(job_id)
     assert report == {"uid": 65532, "network": "OSError", "rootfs": "OSError"}
     assert_gone(job_id)
+
+
+def test_a_run_that_times_out_mid_flight_is_stopped_before_it_is_purged(collection):
+    settings = settings_for(collection, RAG_CONTAINER_TIMEOUT_S="20")
+    spy = SleepingClient(settings)
+    session = ContainerSession(settings, client=spy)
+    chunk = ContextChunk(id="1", text="t", score=0.5, source_id="s")
+    with pytest.raises(ContainerError) as excinfo:
+        with session:
+            NomadGenerator(session).generate(QUERY, [chunk])
+    assert str(excinfo.value) == "container run timed out"
+    assert spy.live_at_purge == []  # the stop was waited on while the task was still running
+    for alloc_id in session._alloc_ids:
+        assert nomad_get(f"/v1/allocation/{alloc_id}").json()["ClientStatus"] in TERMINAL
+    assert_gone(session.job_id)
