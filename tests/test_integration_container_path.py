@@ -238,6 +238,8 @@ def test_a_run_that_times_out_mid_flight_is_stopped_before_it_is_purged(collecti
             NomadGenerator(session).generate(QUERY, [chunk])
     assert str(excinfo.value) == "container run timed out"
     assert spy.live_at_purge == []  # the stop was waited on while the task was still running
-    for alloc_id in session._alloc_ids:
-        assert nomad_get(f"/v1/allocation/{alloc_id}").json()["ClientStatus"] in TERMINAL
+    assert session._alloc_ids  # the task was placed, so the stop had a running container to end
+    for alloc_id in session._alloc_ids:  # the session's GC may already have removed the record
+        response = nomad_get(f"/v1/allocation/{alloc_id}")
+        assert response.status_code == 404 or response.json()["ClientStatus"] in TERMINAL
     assert_gone(session.job_id)
