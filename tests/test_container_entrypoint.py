@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from normalizer import Generation, parse_container_output
+from normalizer import ContextChunk, Generation, from_generation, parse_container_output
+from tests.contract import assert_container_answer_derived
 
 ENTRYPOINT = Path(__file__).resolve().parent.parent / "container" / "entrypoint.py"
 CAP = 65_536
@@ -219,3 +220,31 @@ def test_entrypoint_is_stdlib_only():
     }
     assert imported <= set(sys.stdlib_module_names)
     assert not imported & {"config", "normalizer", "pipeline", "provider", "retriever", "pydantic"}
+
+
+# --- the integration lane's derived-answer assertion ---------------------------------------
+
+
+def response_for(tmp_path, query, ids, generation=None):
+    generation = generation or answer_for(tmp_path, query, chunks(*ids))
+    held = [ContextChunk(id=i, text=f"text of {i}", score=0.5, source_id="s") for i in ids]
+    return from_generation(generation, held, 1.0)
+
+
+def test_the_derived_answer_check_accepts_the_real_entrypoint(tmp_path):
+    assert_container_answer_derived(response_for(tmp_path, "why is it blue?", ["1", "2"]), "why is it blue?")
+
+
+def test_the_derived_answer_check_rejects_an_image_printing_constant_valid_json(tmp_path):
+    constant = parse_container_output(
+        b'{"v":1,"answer":"constant","input_tokens":1,"output_tokens":1}\n', max_bytes=CAP
+    )
+    response = response_for(tmp_path, "q", ["1", "2"], constant)
+    with pytest.raises(AssertionError):
+        assert_container_answer_derived(response, "q")
+
+
+def test_the_derived_answer_check_rejects_another_querys_answer(tmp_path):
+    response = response_for(tmp_path, "other query", ["1"])
+    with pytest.raises(AssertionError):
+        assert_container_answer_derived(response, "why is it blue?")

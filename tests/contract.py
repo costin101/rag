@@ -81,3 +81,15 @@ def assert_valid_rag_response(obj) -> None:
     except (ValueError, TypeError) as exc:
         raise AssertionError(f"response does not survive a JSON round trip: {type(exc).__name__}")
     assert round_tripped == json.loads(wire), "response changed in a JSON round trip"
+
+
+def assert_container_answer_derived(response: RAGResponse, query: str) -> None:
+    """The stub container's answer must be derived from this query and these chunk ids.
+
+    An image that prints constant valid JSON satisfies the contract and still fails here, so the
+    integration lane cannot pass on a container that ignored its input. Mirrors the format in
+    `container/entrypoint.py`.
+    """
+    ids = ", ".join(c.id for c in response.chunks)
+    expected = f'Stub answer to "{query[:80]}" from {len(response.chunks)} chunks: {ids}'
+    assert response.answer == expected, "the answer was not derived from the query and chunks"
