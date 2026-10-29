@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=2.3,<2.4",
     "qdrant-client[fastembed]",
     "huggingface_hub",
+    "httpx",
 ]
 
 [project.optional-dependencies]
