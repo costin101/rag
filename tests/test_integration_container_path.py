@@ -92,6 +92,7 @@ class SpyClient(NomadClient):
         super().__init__(settings)
         self.existed_during_run = None
         self.registered = []
+        self.live_at_purge = None
 
     def read_stdout(self, alloc_id, *args, **kwargs):
         job_id = next(iter(self.registered), None)
@@ -101,6 +102,13 @@ class SpyClient(NomadClient):
     def register(self, body):
         self.registered = [body["Job"]["ID"]]
         super().register(body)
+
+    def deregister(self, job_id):
+        # After the purge the job's allocation list is always empty, so look just before it, once
+        # the stop has been waited on: any non-terminal allocation here is a container still running.
+        allocs = nomad_get(f"/v1/job/{job_id}/allocations").json()
+        self.live_at_purge = [a["ID"] for a in allocs if a["ClientStatus"] not in TERMINAL]
+        super().deregister(job_id)
 
 
 @pytest.fixture(autouse=True)
@@ -134,9 +142,10 @@ def collection(embedder):
 
 
 def assert_gone(job_id):
+    """The job is purged. Running containers are checked by the spy just before the purge: this
+    allocation list is `[]` once the job is gone, so on its own it cannot fail."""
     assert nomad_get(f"/v1/job/{job_id}").status_code == 404
-    allocs = nomad_get(f"/v1/job/{job_id}/allocations").json()
-    assert not [a for a in allocs if a["ClientStatus"] not in TERMINAL]
+    assert nomad_get(f"/v1/job/{job_id}/allocations").json() == []
 
 
 def test_one_query_runs_in_a_container_and_the_job_is_purged(collection, embedder):
@@ -158,18 +167,21 @@ def test_one_query_runs_in_a_container_and_the_job_is_purged(collection, embedde
     (spy,) = spies
     (job_id,) = spy.registered
     assert spy.existed_during_run is True
+    assert spy.live_at_purge == []
     assert_gone(job_id)
 
 
 def test_a_container_that_cannot_start_still_purges_its_job(collection, embedder):
     name = os.environ["RAG_CONTAINER_IMAGE"].split("@")[0]
     settings = settings_for(collection, RAG_CONTAINER_IMAGE=f"{name}@sha256:{'0' * 64}")
-    session = ContainerSession(settings, client=SpyClient(settings))
+    spy = SpyClient(settings)
+    session = ContainerSession(settings, client=spy)
     chunk = ContextChunk(id="1", text="t", score=0.5, source_id="s")
     with pytest.raises(ContainerError) as excinfo:
         with session:
             NomadGenerator(session).generate(QUERY, [chunk])
     assert str(excinfo.value) == "container failed to start"
+    assert spy.live_at_purge == []
     assert_gone(session.job_id)
 
 

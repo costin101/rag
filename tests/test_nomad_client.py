@@ -62,6 +62,14 @@ def test_deregister_is_a_purge_with_the_namespace():
     assert dict(request.url.params) == {"purge": "true", "namespace": NAMESPACE}
 
 
+def test_stop_is_a_delete_without_purge_with_the_namespace():
+    fake = FakeNomad()
+    client_for(fake).stop(JOB)
+    request = fake.requests[-1]
+    assert (request.method, request.url.path) == ("DELETE", f"/v1/job/{JOB}")
+    assert dict(request.url.params) == {"namespace": NAMESPACE}
+
+
 def test_status_reads_use_the_job_paths():
     fake = FakeNomad()
     client = registered(fake)
@@ -129,7 +137,7 @@ def test_an_allocation_id_must_be_a_uuid(bad):
 def test_a_job_id_must_be_a_session_id(bad):
     fake = FakeNomad()
     client = client_for(fake)
-    for call in (client.deregister, client.evaluations, client.allocations):
+    for call in (client.deregister, client.stop, client.evaluations, client.allocations):
         with pytest.raises(ContainerError):
             call(bad)
     assert fake.requests == []

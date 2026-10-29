@@ -137,6 +137,7 @@ class FakeNomad:
         edit_allocations: Callable[[list[dict]], list[dict]] | None = None,
         register_status: int | None = None,
         deregister_status: int | None = None,
+        stop_status: int | None = None,
         logs_status: int | None = None,
         logs_fail_midway: bool = False,
         redirect_register: bool = False,
@@ -146,12 +147,14 @@ class FakeNomad:
         self.edit_allocations = edit_allocations
         self.register_status = register_status
         self.deregister_status = deregister_status
+        self.stop_status = stop_status
         self.logs_status = logs_status
         self.logs_fail_midway = logs_fail_midway
         self.redirect_register = redirect_register
         self.requests: list[httpx.Request] = []
         self.registered: list[str] = []
         self.specs: list[dict] = []
+        self.stopped = False
         self.purged = False
         self.streamed_chunks = 0
 
@@ -222,9 +225,14 @@ class FakeNomad:
         return httpx.Response(200, stream=_Stream(chunks, count, self.logs_fail_midway))
 
     def _deregister(self, request, job):
-        self.purged = True
-        if self.deregister_status is not None:
-            return httpx.Response(self.deregister_status, text="LEAK-deregister-body")
+        """`DELETE` without `purge` stops the job (it stays listed); with `purge=true` it is gone."""
+        status = self.deregister_status if request.url.params.get("purge") == "true" else self.stop_status
+        if request.url.params.get("purge") == "true":
+            self.purged = True
+        else:
+            self.stopped = True
+        if status is not None:
+            return httpx.Response(status, text="LEAK-deregister-body")
         return self._reply(f"{self.scenario}-deregister")
 
     def _gc(self, request, alloc):
@@ -239,11 +247,12 @@ def _swap_job_id(body, new: str):
 
 
 def assert_purged_once(fake: FakeNomad, namespace: str | None = NAMESPACE) -> None:
-    """Exactly one `DELETE /v1/job/<registered id>?purge=true` (with namespace), after register."""
+    """Stop (`DELETE`, no purge) then exactly one `DELETE /v1/job/<id>?purge=true`, after register."""
     deletes = [r for r in fake.requests if r.method == "DELETE"]
-    assert len(deletes) == 1, f"expected one purge, saw {len(deletes)}"
-    (delete,) = deletes
-    assert delete.url.path == f"/v1/job/{fake.job_id}"
-    expected = {"purge": "true"} | ({"namespace": namespace} if namespace else {})
-    assert dict(delete.url.params) == expected
-    assert fake.requests.index(delete) > fake.requests.index(fake.calls("register")[0])
+    assert len(deletes) == 2, f"expected a stop and one purge, saw {len(deletes)} deletes"
+    stop, purge = deletes
+    scope = {"namespace": namespace} if namespace else {}
+    for delete, params in ((stop, scope), (purge, {"purge": "true"} | scope)):
+        assert delete.url.path == f"/v1/job/{fake.job_id}"
+        assert dict(delete.url.params) == params
+    assert fake.requests.index(stop) > fake.requests.index(fake.calls("register")[0])

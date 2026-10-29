@@ -16,7 +16,7 @@ from config import Settings
 from nomad_client import NomadClient, build_job
 from normalizer import ContainerError, ContextChunk
 
-# How often the allocation is read, and how many reads the purge waits for it to stop.
+# How often the allocation is read, and how many reads the stop waits for it to end.
 _POLL_S = 0.5
 _PURGE_POLLS = 10
 
@@ -142,17 +142,20 @@ class ContainerSession:
                     pass
 
     def _purge(self, job_id: str) -> None:
+        # Stop first and wait while the job is still registered: once it is purged, Nomad answers
+        # the job's allocation list with `[]` whether or not the container is still running.
         try:
-            self._client.deregister(job_id)
-        except ContainerError:
-            return  # best effort: the original failure, if any, is the one to report
-        try:
+            self._client.stop(job_id)
             for _ in range(_PURGE_POLLS):
                 allocs = self._client.allocations(job_id)
                 if not any(a.get("ClientStatus") in _RUNNING for a in allocs):
                     break
                 self._sleep(_POLL_S)
         except ContainerError:
-            pass
+            pass  # best effort: the purge below still runs, and the original failure is the one to report
+        try:
+            self._client.deregister(job_id)
+        except ContainerError:
+            return
         for alloc_id in sorted(self._alloc_ids):
             self._client.gc_allocation(alloc_id)

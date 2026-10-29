@@ -203,7 +203,7 @@ def test_logs_cut_off_midway():
 
 def test_a_failing_purge_does_not_mask_the_original_error():
     fake, _ = run_failing(FakeNomad("exit3", deregister_status=500), "container exited with a failure")
-    assert len(fake.calls("deregister")) == 1
+    assert len(fake.calls("deregister")) == 2  # the stop, then the failing purge
 
 
 def test_a_failing_purge_after_success_does_not_raise():
@@ -214,45 +214,47 @@ def test_a_failing_purge_after_success_does_not_raise():
 
 
 class Lingering(FakeNomad):
-    """After the purge, the allocation still reads `running` for `polls` more reads."""
+    """After the stop, the allocation still reads `running` for `polls` more reads."""
 
     def __init__(self, polls):
         super().__init__()
         self.polls = polls
-        self.reads_after_purge = 0
+        self.reads_after_stop = 0
 
     def _allocation_list(self):
         allocs = super()._allocation_list()
-        if self.purged:
-            self.reads_after_purge += 1
-            if self.reads_after_purge <= self.polls:
+        if self.stopped:
+            self.reads_after_stop += 1
+            if self.reads_after_stop <= self.polls:
                 allocs[0]["ClientStatus"] = "running"
         return allocs
 
-    def _allocations(self, request, job):
-        if self.purged:
-            body = self._allocation_list()
-            if body[0]["ClientStatus"] == "running":
-                return httpx.Response(200, json=body)
-            return super()._allocations(request, job)
-        return super()._allocations(request, job)
 
-
-def test_purge_polls_until_no_allocation_is_running_then_stops():
+def test_the_job_is_stopped_then_waited_on_then_purged():
     fake = Lingering(polls=2)
     session, _, _ = make(fake)
     with session:
         session.run(QUERY, CHUNKS)
-    assert fake.reads_after_purge == 3
+    stop, purge = [r for r in fake.requests if r.method == "DELETE"]
+    between = [r for r in fake.requests[fake.requests.index(stop) : fake.requests.index(purge)] if r.method == "GET"]
+    assert fake.reads_after_stop == 3  # two running reads, then the terminal one
+    assert len(fake.calls("allocations")) >= 3 and len(between) == 3
     assert_purged_once(fake)
 
 
-def test_the_purge_poll_is_bounded():
+def test_the_wait_is_bounded():
     fake = Lingering(polls=10**6)
     session, _, clock = make(fake)
     with session:
         session.run(QUERY, CHUNKS)
-    assert fake.reads_after_purge < 30
+    assert fake.reads_after_stop < 30
+    assert_purged_once(fake)
+
+
+def test_a_failing_stop_still_purges_and_does_not_raise():
+    session, fake, _ = make(FakeNomad(stop_status=500))
+    with session:
+        assert session.run(QUERY, CHUNKS) == fake.stdout
     assert_purged_once(fake)
 
 

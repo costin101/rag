@@ -148,6 +148,10 @@ class NomadClient:
     def allocations(self, job_id: str) -> list[dict]:
         return self._json(self._send("GET", f"/v1/job/{_job(job_id)}/allocations"), list)
 
+    def stop(self, job_id: str) -> None:
+        """Stop the job but keep it registered, so its allocations stay readable until it is purged."""
+        self._json(self._send("DELETE", f"/v1/job/{_job(job_id)}"), dict)
+
     def deregister(self, job_id: str) -> None:
         """Stop and purge the job (`purge=true`: no record is left for Nomad's garbage collector)."""
         self._json(self._send("DELETE", f"/v1/job/{_job(job_id)}", params={"purge": "true"}), dict)
