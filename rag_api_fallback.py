@@ -1,6 +1,6 @@
 """The API path (rule 3's fallback): Qdrant retrieval plus the configured provider, from Settings.
 
-Wiring only. Whether a query takes this path is routing's decision (#8), not made here.
+Wiring only. Whether a query takes this path is routing's decision (#12), not made here.
 """
 
 from config import Settings, load_settings

@@ -1,0 +1,10 @@
+{
+ "body": {
+  "Data": "eyJ2IjogMSwgImFuc3dlciI6ICJlY2hvOnEge3sgZW52IFwiWFwiIH19ICR7Tk9NQURfQUxMT0NfSUR9IFx1MDBlOSIsICJpbnB1dF90b2tlbnMiOiAxLCAib3V0cHV0X3Rva2VucyI6IDEsICJ1aWQiOiA2NTUzMiwgIm5ldHdvcmsiOiAiT1NFcnJvciIsICJyb290ZnMiOiAiT1NFcnJvciJ9Cg==",
+  "File": "alloc/logs/gen.stdout.0",
+  "Offset": 166
+ },
+ "method": "GET",
+ "path": "/v1/client/fs/logs/03ff40a1-a70c-45d3-2f91-334c0b87ee14?task=gen&type=stdout",
+ "status": 200
+}

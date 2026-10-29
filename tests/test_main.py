@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import main
-from normalizer import ContextChunk, ProviderError, RAGResponse, RetrievalError, Source, Usage, Metrics
+from normalizer import ContainerError, ContextChunk, ProviderError, RAGResponse, RetrievalError, Source, Usage, Metrics
 from tests.contract import assert_valid_rag_response
 
 ROOT = Path(__file__).parent.parent
@@ -37,7 +37,7 @@ class FakePath:
         return self.result
 
 
-def run(argv, *, env=ENV, path=None):
+def run(argv, *, env=ENV, path=None, container=None):
     out, err = io.StringIO(), io.StringIO()
     built = []
 
@@ -45,7 +45,11 @@ def run(argv, *, env=ENV, path=None):
         built.append(settings)
         return path
 
-    code = main.run(argv, env=env, out=out, err=err, api_path=factory)
+    def container_factory(settings):
+        built.append(settings)
+        return container
+
+    code = main.run(argv, env=env, out=out, err=err, api_path=factory, container_path=container_factory)
     return code, out.getvalue(), err.getvalue(), built
 
 
@@ -63,7 +67,9 @@ def test_settings_come_from_the_given_environment():
     assert built[0].QDRANT_COLLECTION == "docs"
 
 
-@pytest.mark.parametrize("argv", [[], ["a", "b"]])
+@pytest.mark.parametrize(
+    "argv", [[], ["a", "b"], ["--path", "container"], ["--path", "bogus", "q"], ["--route", "api", "q"], ["--path", "api", "q", "x"]]
+)
 def test_wrong_argument_count_is_a_usage_error(argv):
     code, out, err, built = run(argv, path=FakePath(result=response()))
     assert (code, out, built) == (2, "", [])
@@ -119,6 +125,57 @@ def test_default_wiring_builds_the_api_path_from_settings(monkeypatch):
     monkeypatch.setattr(main, "ApiPath", Stub)
     out, err = io.StringIO(), io.StringIO()
     assert main.run(["q"], env=ENV, out=out, err=err) == 0
+    assert built[0].QDRANT_COLLECTION == "docs"
+
+
+def test_path_container_answers_through_the_container_path_only():
+    api, container = FakePath(result=response()), FakePath(result=response())
+    code, out, err, built = run(["--path", "container", "Why?"], path=api, container=container)
+    assert (code, err) == (0, "")
+    assert_valid_rag_response(json.loads(out))
+    assert (container.queries, api.queries, len(built)) == (["Why?"], [], 1)
+
+
+def test_path_api_and_the_default_answer_through_the_api_path_only():
+    for argv in (["--path", "api", "q"], ["q"]):
+        api, container = FakePath(result=response()), FakePath(result=response())
+        code, _, err, _ = run(argv, path=api, container=container)
+        assert (code, err, api.queries, container.queries) == (0, "", ["q"], [])
+
+
+def test_a_container_error_prints_a_fixed_line_without_its_message():
+    container = FakePath(error=ContainerError(f"container run failed {KEY}"))
+    code, out, err, _ = run(["--path", "container", "q"], container=container)
+    assert (code, out) == (1, "")
+    assert KEY not in err and "container run failed" not in err and err.count("\n") == 1
+
+
+def test_blank_query_on_the_container_path_builds_nothing():
+    code, out, err, built = run(["--path", "container", " "], container=FakePath(result=response()))
+    assert (code, out, built) == (1, "", [])
+    assert err.startswith("invalid_query: ")
+
+
+def test_container_path_without_nomad_settings_names_the_missing_variables():
+    out, err = io.StringIO(), io.StringIO()
+    code = main.run(["--path", "container", "q"], env=ENV, out=out, err=err)
+    assert (code, out.getvalue()) == (1, "")
+    assert err.getvalue().startswith("config_invalid: ")
+    assert "NOMAD_ADDR" in err.getvalue() and "RAG_CONTAINER_IMAGE" in err.getvalue()
+    assert err.getvalue().count("\n") == 1
+
+
+def test_default_wiring_builds_the_container_path_from_settings(monkeypatch):
+    built = []
+
+    class Stub(FakePath):
+        def __init__(self, settings):
+            super().__init__(result=response())
+            built.append(settings)
+
+    monkeypatch.setattr(main, "ContainerPath", Stub)
+    out, err = io.StringIO(), io.StringIO()
+    assert main.run(["--path", "container", "q"], env=ENV, out=out, err=err) == 0
     assert built[0].QDRANT_COLLECTION == "docs"
 
 

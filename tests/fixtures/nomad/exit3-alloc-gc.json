@@ -1,0 +1,8 @@
+{
+ "body": {
+  "_raw_text": ""
+ },
+ "method": "PUT",
+ "path": "/v1/client/allocation/03ff40a1-a70c-45d3-2f91-334c0b87ee14/gc",
+ "status": 200
+}

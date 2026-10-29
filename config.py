@@ -38,6 +38,16 @@ _DECIMAL = re.compile(r"[0-9]{1,9}(\.[0-9]{1,9})?")
 # The collection name is interpolated into Qdrant REST paths: no separators, '..' or escapes.
 _COLLECTION = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*")
 
+# A digest-pinned image: optional registry host[:port], repository path, full sha256. A tag-only
+# reference can move and a leading '-' would read as a docker flag, so neither is accepted.
+_IMAGE_PART = r"[a-z0-9]+(?:[._-][a-z0-9]+)*"
+_IMAGE = re.compile(
+    rf"(?:{_IMAGE_PART}(?::[0-9]{{1,5}})?/)?{_IMAGE_PART}(?:/{_IMAGE_PART})*@sha256:[0-9a-f]{{64}}"
+)
+
+# Nomad namespace names go into a query parameter and the job spec: letters, digits, '-' only.
+_NAMESPACE = re.compile(r"[A-Za-z0-9-]{1,128}")
+
 TextField = Annotated[str, Field(min_length=1)]
 
 # The default embedding model and its pinned Hugging Face commit (checked 2026-10-28).
@@ -76,7 +86,31 @@ class Settings(BaseModel):
     RAG_EMBED_CACHE_DIR: Path | None = None
     RAG_EMBED_ENDPOINT: str = DEFAULT_EMBED_ENDPOINT
 
-    @field_validator("RAG_MAX_TOKENS", "RAG_PROVIDER_MAX_RETRIES", "RAG_TOP_K", mode="before")
+    # The container path (all optional: the API path runs without Nomad; ContainerPath checks
+    # that what it needs is set). Declared token-first so NOMAD_ADDR's validator can see it.
+    NOMAD_TOKEN: SecretStr | None = None
+    NOMAD_ADDR: str | None = None
+    NOMAD_CACERT: Path | None = None
+    NOMAD_NAMESPACE: str | None = None
+    RAG_CONTAINER_IMAGE: str | None = None
+    RAG_CONTAINER_CPU_MHZ: StrictInt = Field(default=500, ge=1, le=100_000)
+    # Above Nomad's floor and the interpreter's own need.
+    RAG_CONTAINER_MEMORY_MB: StrictInt = Field(default=128, ge=64, le=8192)
+    RAG_CONTAINER_TIMEOUT_S: TimeoutS = 60.0
+    # Caps on the input the host sends in the job spec and the stdout it reads back.
+    RAG_CONTAINER_MAX_INPUT_BYTES: StrictInt = Field(default=262_144, ge=1024, le=1_048_576)
+    RAG_CONTAINER_MAX_OUTPUT_BYTES: StrictInt = Field(default=65_536, ge=1024, le=1_048_576)
+
+    @field_validator(
+        "RAG_MAX_TOKENS",
+        "RAG_PROVIDER_MAX_RETRIES",
+        "RAG_TOP_K",
+        "RAG_CONTAINER_CPU_MHZ",
+        "RAG_CONTAINER_MEMORY_MB",
+        "RAG_CONTAINER_MAX_INPUT_BYTES",
+        "RAG_CONTAINER_MAX_OUTPUT_BYTES",
+        mode="before",
+    )
     @classmethod
     def _whole_number(cls, value):
         if isinstance(value, str):
@@ -86,7 +120,11 @@ class Settings(BaseModel):
         return value
 
     @field_validator(
-        "RAG_PROVIDER_TIMEOUT_S", "RAG_PROVIDER_MAX_RETRY_WAIT_S", "QDRANT_TIMEOUT_S", mode="before"
+        "RAG_PROVIDER_TIMEOUT_S",
+        "RAG_PROVIDER_MAX_RETRY_WAIT_S",
+        "QDRANT_TIMEOUT_S",
+        "RAG_CONTAINER_TIMEOUT_S",
+        mode="before",
     )
     @classmethod
     def _decimal_number(cls, value):
@@ -96,7 +134,7 @@ class Settings(BaseModel):
             return float(value)
         return value
 
-    @field_validator("ANTHROPIC_API_KEY", "QDRANT_API_KEY", mode="before")
+    @field_validator("ANTHROPIC_API_KEY", "QDRANT_API_KEY", "NOMAD_TOKEN", mode="before")
     @classmethod
     def _clean_key(cls, value):
         raw = value.get_secret_value() if isinstance(value, SecretStr) else value
@@ -123,7 +161,7 @@ class Settings(BaseModel):
             raise ValueError("must contain only letters, digits, '_', '-' and inner '.'")
         return value
 
-    @field_validator("RAG_EMBED_CACHE_DIR", mode="before")
+    @field_validator("RAG_EMBED_CACHE_DIR", "NOMAD_CACERT", mode="before")
     @classmethod
     def _no_nul(cls, value):
         if isinstance(value, str) and "\0" in value:
@@ -164,6 +202,32 @@ class Settings(BaseModel):
             raise ValueError("must be https when QDRANT_API_KEY is set")
         return url
 
+    @field_validator("NOMAD_ADDR")
+    @classmethod
+    def _nomad_url(cls, url: str | None, info: ValidationInfo) -> str | None:
+        if url is None:
+            return None
+        problem = url_problem(url, allow_query=False)
+        if problem:
+            raise ValueError(problem)
+        if info.data.get("NOMAD_TOKEN") is not None and not url.lower().startswith("https://"):
+            raise ValueError("must be https when NOMAD_TOKEN is set")
+        return url
+
+    @field_validator("NOMAD_NAMESPACE")
+    @classmethod
+    def _namespace(cls, name: str | None) -> str | None:
+        if name is not None and not _NAMESPACE.fullmatch(name):
+            raise ValueError("must be 1-128 letters, digits or '-'")
+        return name
+
+    @field_validator("RAG_CONTAINER_IMAGE")
+    @classmethod
+    def _pinned_image(cls, image: str | None) -> str | None:
+        if image is not None and not _IMAGE.fullmatch(image):
+            raise ValueError("must be name@sha256:<64 hex digits>")
+        return image
+
 
 def _reason(error) -> str:
     if error["type"] == "missing":
@@ -184,15 +248,16 @@ def _validate(source: Mapping[str, str]) -> tuple[Settings | None, str]:
     except ValidationError as exc:
         found = [f"{e['loc'][0]}: {_reason(e)}" for e in exc.errors()]
     # A key that failed validation never reaches the https check; report both together.
-    url = values.get("QDRANT_URL")
-    if (
-        any(m.startswith("QDRANT_API_KEY:") for m in found)
-        and not any(m.startswith("QDRANT_URL:") for m in found)
-        and isinstance(url, str)
-        and not url_problem(url, allow_query=False)
-        and not url.lower().startswith("https://")
-    ):
-        found.append("QDRANT_URL: must be https when QDRANT_API_KEY is set")
+    for key_name, url_name in (("QDRANT_API_KEY", "QDRANT_URL"), ("NOMAD_TOKEN", "NOMAD_ADDR")):
+        url = values.get(url_name)
+        if (
+            any(m.startswith(f"{key_name}:") for m in found)
+            and not any(m.startswith(f"{url_name}:") for m in found)
+            and isinstance(url, str)
+            and not url_problem(url, allow_query=False)
+            and not url.lower().startswith("https://")
+        ):
+            found.append(f"{url_name}: must be https when {key_name} is set")
     return None, "; ".join(found)
 
 

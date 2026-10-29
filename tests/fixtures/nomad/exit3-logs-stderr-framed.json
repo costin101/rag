@@ -1,0 +1,10 @@
+{
+ "body": {
+  "Data": "c3Bpa2Ugc3RkZXJyIGxpbmUK",
+  "File": "alloc/logs/gen.stderr.0",
+  "Offset": 18
+ },
+ "method": "GET",
+ "path": "/v1/client/fs/logs/03ff40a1-a70c-45d3-2f91-334c0b87ee14?task=gen&type=stderr",
+ "status": 200
+}

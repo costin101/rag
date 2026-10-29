@@ -1,8 +1,11 @@
 """The single caller-visible response contract (rule 1) and the public error set.
 
-Path adapters (generation -> RAGResponse) live here; vendor payload formats never do.
+Path adapters (generation -> RAGResponse) live here; vendor payload formats never do. The public
+error set is `RAGError` and its subclasses; `ContainerError` is internal to the container path
+and never reaches a caller.
 """
 
+import json
 import unicodedata
 from collections.abc import Sequence
 from enum import StrEnum
@@ -160,6 +163,13 @@ class ProviderPayloadError(RAGError):
         super().__init__(ErrorCode.PROVIDER_PAYLOAD_INVALID, message)
 
 
+class ContainerError(Exception):
+    """The container path failed. Internal, NOT a `RAGError`: callers never see it.
+
+    Messages are fixed text: never a Nomad body, host, token or any container output.
+    """
+
+
 class Generation(_Model):
     """Provider-neutral generation result: what any path hands to its adapter."""
 
@@ -193,3 +203,69 @@ def from_generation(
     finally:
         # Error trackers capture locals: the context and the generated text stay out of them.
         generation = chunks = None
+
+
+_CONTAINER_KEYS = frozenset({"v", "answer", "input_tokens", "output_tokens"})
+_TOO_LARGE = "container output too large"
+_NOT_V1 = "container output is not a valid v1 result"
+
+
+def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    keys = [key for key, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _refuse_constant(_name: str):
+    raise ValueError("not a JSON number")
+
+
+def _read_container_output(stdout, max_bytes: int) -> Generation | str:
+    """The generation, or the fixed refusal text. Never raises on bad input, never echoes it."""
+    if type(stdout) is not bytes:
+        return _NOT_V1
+    if len(stdout) > max_bytes:
+        return _TOO_LARGE
+    # One line, optionally ended by one newline; whitespace, a BOM or a second line is a refusal.
+    body = stdout[:-1] if stdout.endswith(b"\n") else stdout
+    if not (body.startswith(b"{") and body.endswith(b"}")) or b"\n" in body or b"\r" in body:
+        return _NOT_V1
+    try:
+        data = json.loads(
+            body.decode("utf-8"), object_pairs_hook=_unique_pairs, parse_constant=_refuse_constant
+        )
+    except (ValueError, RecursionError):
+        return _NOT_V1
+    if type(data) is not dict or data.keys() != _CONTAINER_KEYS or type(data["v"]) is not int:
+        return _NOT_V1
+    answer, tokens = data["answer"], (data["input_tokens"], data["output_tokens"])
+    if data["v"] != 1 or type(answer) is not str or any(type(n) is not int for n in tokens):
+        return _NOT_V1
+    if not all(0 <= n <= 10**12 for n in tokens) or is_blank(answer):
+        return _NOT_V1
+    try:
+        answer.encode("utf-8")  # a lone surrogate escape decodes but cannot be sent on
+    except UnicodeEncodeError:
+        return _NOT_V1
+    return Generation(text=answer, input_tokens=tokens[0], output_tokens=tokens[1])
+
+
+def parse_container_output(stdout: bytes, *, max_bytes: int) -> Generation:
+    """Parse the container's stdout v1 line into a Generation, or raise a fixed ContainerError.
+
+    Strict: at most `max_bytes` bytes, exactly one JSON object line (an optional final newline)
+    `{"v":1,"answer":str,"input_tokens":int,"output_tokens":int}` with exactly those keys, no
+    duplicates, NaN or Infinity, plain ints (no bool) within the token range and a visible answer.
+    The output is untrusted: the error is raised outside any `except` (no cause or context) and
+    after the names are cleared, so neither it nor a traceback with captured locals carries it.
+    """
+    try:
+        result = _read_container_output(stdout, max_bytes)
+    except Exception:
+        result = _NOT_V1
+    finally:
+        stdout = None
+    if isinstance(result, str):
+        raise ContainerError(result)
+    return result

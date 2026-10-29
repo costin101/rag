@@ -713,3 +713,293 @@ def test_invalid_provider_base_url(bad):
 def test_provider_base_url_must_be_https_case_insensitively():
     s = load_settings(valid_env(RAG_PROVIDER_BASE_URL="HTTPS://gateway.example.com"))
     assert s.RAG_PROVIDER_BASE_URL == "HTTPS://gateway.example.com"
+
+
+# --- container path (all optional: the API path runs without any of them) ---------
+
+DIGEST = "a" * 64
+IMAGE = f"registry.example.com:5000/rag/session@sha256:{DIGEST}"
+NOMAD_TOKEN = "test-not-a-key-nomad"
+
+CONTAINER_NAMES = (
+    "NOMAD_ADDR",
+    "NOMAD_TOKEN",
+    "NOMAD_CACERT",
+    "NOMAD_NAMESPACE",
+    "RAG_CONTAINER_IMAGE",
+    "RAG_CONTAINER_CPU_MHZ",
+    "RAG_CONTAINER_MEMORY_MB",
+    "RAG_CONTAINER_TIMEOUT_S",
+    "RAG_CONTAINER_MAX_INPUT_BYTES",
+    "RAG_CONTAINER_MAX_OUTPUT_BYTES",
+)
+
+
+def test_container_settings_are_optional_and_default_to_unset_or_bounded_values():
+    s = load_settings(valid_env())
+    assert (s.NOMAD_ADDR, s.NOMAD_TOKEN, s.NOMAD_CACERT, s.NOMAD_NAMESPACE) == (None,) * 4
+    assert s.RAG_CONTAINER_IMAGE is None
+    assert s.RAG_CONTAINER_CPU_MHZ == 500
+    assert s.RAG_CONTAINER_MEMORY_MB == 128
+    assert s.RAG_CONTAINER_TIMEOUT_S == 60.0
+    assert s.RAG_CONTAINER_MAX_INPUT_BYTES == 262_144
+    assert s.RAG_CONTAINER_MAX_OUTPUT_BYTES == 65_536
+    assert isinstance(s.RAG_CONTAINER_TIMEOUT_S, float)
+
+
+@pytest.mark.parametrize("name", CONTAINER_NAMES)
+def test_no_container_setting_is_required(name):
+    assert name not in REQUIRED
+    assert name in Settings.model_fields
+    assert not Settings.model_fields[name].is_required()
+
+
+def test_container_settings_overridable():
+    s = load_settings(
+        valid_env(
+            NOMAD_ADDR="https://nomad.example.com:4646",
+            NOMAD_TOKEN=NOMAD_TOKEN,
+            NOMAD_CACERT="/etc/nomad/ca.pem",
+            NOMAD_NAMESPACE="rag-sessions",
+            RAG_CONTAINER_IMAGE=IMAGE,
+            RAG_CONTAINER_CPU_MHZ="250",
+            RAG_CONTAINER_MEMORY_MB="256",
+            RAG_CONTAINER_TIMEOUT_S="12.5",
+            RAG_CONTAINER_MAX_INPUT_BYTES="4096",
+            RAG_CONTAINER_MAX_OUTPUT_BYTES="2048",
+        )
+    )
+    assert s.NOMAD_ADDR == "https://nomad.example.com:4646"
+    assert s.NOMAD_TOKEN.get_secret_value() == NOMAD_TOKEN
+    assert s.NOMAD_CACERT == Path("/etc/nomad/ca.pem")
+    assert s.NOMAD_NAMESPACE == "rag-sessions"
+    assert s.RAG_CONTAINER_IMAGE == IMAGE
+    assert (s.RAG_CONTAINER_CPU_MHZ, s.RAG_CONTAINER_MEMORY_MB) == (250, 256)
+    assert s.RAG_CONTAINER_TIMEOUT_S == 12.5
+    assert (s.RAG_CONTAINER_MAX_INPUT_BYTES, s.RAG_CONTAINER_MAX_OUTPUT_BYTES) == (4096, 2048)
+
+
+def test_blank_container_settings_count_as_unset():
+    s = load_settings(valid_env(**{name: " " for name in CONTAINER_NAMES}))
+    assert s.NOMAD_ADDR is None and s.RAG_CONTAINER_IMAGE is None and s.NOMAD_TOKEN is None
+    assert s.RAG_CONTAINER_MEMORY_MB == 128
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "ftp://nomad",
+        "nomad:4646",
+        "http://",
+        "https://TOKEN@nomad",
+        "https://nomad:4646/?k=v",
+        "https://nomad#frag",
+        "http://nomad:abc",
+        "http://no mad",
+        "https://nomad​",
+    ],
+)
+def test_invalid_nomad_addr(bad):
+    err = error_for(valid_env(NOMAD_ADDR=bad))
+    assert "NOMAD_ADDR" in str(err)
+    assert "TOKEN@" not in f"{err} {full_trace(err)}"
+
+
+@pytest.mark.parametrize("good", ["http://127.0.0.1:4646", "https://nomad.example.com:4646"])
+def test_valid_nomad_addr_without_token(good):
+    assert load_settings(valid_env(NOMAD_ADDR=good)).NOMAD_ADDR == good
+
+
+def test_https_required_when_nomad_token_set():
+    err = error_for(valid_env(NOMAD_ADDR="http://nomad.example.com:4646", NOMAD_TOKEN=NOMAD_TOKEN))
+    assert "NOMAD_ADDR: must be https when NOMAD_TOKEN is set" in str(err)
+    assert NOMAD_TOKEN not in f"{err} {full_trace(err)}"
+
+
+def test_https_with_nomad_token_accepted_case_insensitively():
+    s = load_settings(valid_env(NOMAD_ADDR="HTTPS://nomad.example.com", NOMAD_TOKEN=NOMAD_TOKEN))
+    assert s.NOMAD_TOKEN.get_secret_value() == NOMAD_TOKEN
+
+
+def test_bad_nomad_token_and_plain_http_addr_are_reported_together():
+    err = error_for(valid_env(NOMAD_ADDR="http://nomad.example.com", NOMAD_TOKEN="bad token"))
+    assert "NOMAD_TOKEN" in str(err)
+    assert "NOMAD_ADDR: must be https when NOMAD_TOKEN is set" in str(err)
+
+
+@pytest.mark.parametrize("char", HIDDEN_CHARS.values(), ids=HIDDEN_CHARS.keys())
+def test_nomad_token_with_interior_hidden_character_rejected(char):
+    err = error_for(valid_env(NOMAD_TOKEN=f"LEAK{char}SECRET"))
+    assert "NOMAD_TOKEN: must not contain whitespace or control characters" in str(err)
+    assert "LEAK" not in f"{err} {err!r} {full_trace(err)}"
+
+
+@pytest.mark.parametrize("char", NON_ASCII_CHARS.values(), ids=NON_ASCII_CHARS.keys())
+def test_nomad_token_with_non_ascii_character_rejected(char):
+    err = error_for(valid_env(NOMAD_TOKEN=f"LEAK{char}SECRET"))
+    assert "NOMAD_TOKEN: must contain only printable ASCII characters" in str(err)
+    assert "LEAK" not in f"{err} {err!r} {full_trace(err)}"
+
+
+def test_nomad_token_repr_hides_the_secret():
+    s = load_settings(
+        valid_env(NOMAD_ADDR="https://nomad.example.com", NOMAD_TOKEN="test-not-a-key-LEAK-nomad")
+    )
+    assert "LEAK" not in f"{s!r} {s}"
+
+
+def test_nomad_token_without_addr_is_a_config_matter_for_the_container_path_not_for_load():
+    assert load_settings(valid_env(NOMAD_TOKEN=NOMAD_TOKEN)).NOMAD_ADDR is None
+
+
+def test_nomad_cacert_rejects_nul_byte():
+    assert "NOMAD_CACERT" in str(error_for(valid_env(NOMAD_CACERT="/etc/a\x00b")))
+
+
+@pytest.mark.parametrize("good", ["default", "rag-sessions", "A1", "a" * 128, "-", "9-9"])
+def test_nomad_namespace_accepts_letters_digits_and_hyphen(good):
+    assert load_settings(valid_env(NOMAD_NAMESPACE=good)).NOMAD_NAMESPACE == good
+
+
+@pytest.mark.parametrize(
+    "bad", ["a" * 129, "a b", "a/b", "a_b", "a.b", "a?x=1", "a#b", "a%2f", "..", "é", "a\x00b", "a​"]
+)
+def test_nomad_namespace_rejects_everything_else(bad):
+    err = error_for(valid_env(NOMAD_NAMESPACE=bad))
+    assert "NOMAD_NAMESPACE" in str(err)
+    assert bad not in str(err)
+
+
+@pytest.mark.parametrize("good", [IMAGE, f"python@sha256:{DIGEST}", f"127.0.0.1:5000/rag@sha256:{DIGEST}"])
+def test_container_image_accepts_a_digest_pinned_reference(good):
+    assert load_settings(valid_env(RAG_CONTAINER_IMAGE=good)).RAG_CONTAINER_IMAGE == good
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "rag/session",
+        "rag/session:latest",
+        "rag/session:1.2.3",
+        f"rag/session:latest@sha256:{DIGEST}",
+        f"@sha256:{DIGEST}",
+        "rag/session@sha256:" + "a" * 63,
+        "rag/session@sha256:" + "a" * 65,
+        "rag/session@sha256:" + "A" * 64,
+        "rag/session@sha256:" + "g" * 64,
+        "rag/session@sha512:" + "a" * 128,
+        "rag/session@" + "a" * 64,
+        f"-rag@sha256:{DIGEST}",
+        f"Rag/Session@sha256:{DIGEST}",
+        f"rag//session@sha256:{DIGEST}",
+        f"rag/session @sha256:{DIGEST}",
+        f"rag/session@sha256:{DIGEST}\n--privileged",
+        f"https://rag/session@sha256:{DIGEST}",
+        f"rag/session@sha256:{DIGEST}@sha256:{DIGEST}",
+    ],
+)
+def test_container_image_rejects_anything_but_a_full_digest_pin(bad):
+    err = error_for(valid_env(RAG_CONTAINER_IMAGE=bad))
+    assert "RAG_CONTAINER_IMAGE: must be name@sha256:<64 hex digits>" in str(err)
+
+
+@pytest.mark.parametrize(
+    "name,low,high",
+    [
+        ("RAG_CONTAINER_CPU_MHZ", 1, 100_000),
+        ("RAG_CONTAINER_MEMORY_MB", 64, 8192),
+        ("RAG_CONTAINER_MAX_INPUT_BYTES", 1024, 1_048_576),
+        ("RAG_CONTAINER_MAX_OUTPUT_BYTES", 1024, 1_048_576),
+    ],
+)
+def test_container_whole_number_bounds_are_inclusive(name, low, high):
+    assert getattr(load_settings(valid_env(**{name: str(low)})), name) == low
+    assert getattr(load_settings(valid_env(**{name: str(high)})), name) == high
+    for bad in (str(low - 1), str(high + 1)):
+        assert name in str(error_for(valid_env(**{name: bad})))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RAG_CONTAINER_CPU_MHZ",
+        "RAG_CONTAINER_MEMORY_MB",
+        "RAG_CONTAINER_MAX_INPUT_BYTES",
+        "RAG_CONTAINER_MAX_OUTPUT_BYTES",
+    ],
+)
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "1.5", "1_000", "+500", "１００", "1e3", "true"])
+def test_container_whole_numbers_are_plain_decimals(name, bad):
+    assert name in str(error_for(valid_env(**{name: bad})))
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "nan", "inf", "1e3", "+5", "5.", ".5", "601"])
+def test_invalid_container_timeout(bad):
+    assert "RAG_CONTAINER_TIMEOUT_S" in str(error_for(valid_env(RAG_CONTAINER_TIMEOUT_S=bad)))
+
+
+def test_container_timeout_upper_bound_inclusive():
+    assert load_settings(valid_env(RAG_CONTAINER_TIMEOUT_S="600")).RAG_CONTAINER_TIMEOUT_S == 600
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("RAG_CONTAINER_CPU_MHZ", True),
+        ("RAG_CONTAINER_CPU_MHZ", 500.0),
+        ("RAG_CONTAINER_MEMORY_MB", True),
+        ("RAG_CONTAINER_MEMORY_MB", 128.0),
+        ("RAG_CONTAINER_TIMEOUT_S", True),
+        ("RAG_CONTAINER_MAX_INPUT_BYTES", True),
+        ("RAG_CONTAINER_MAX_OUTPUT_BYTES", 2048.0),
+    ],
+)
+def test_container_direct_construction_rejects_bool_and_float_for_int(name, value):
+    with pytest.raises(ValidationError):
+        Settings(**DIRECT, **{name: value})
+
+
+@pytest.mark.parametrize("name", ["RAG_CONTAINER_IMAGE", "NOMAD_NAMESPACE", "NOMAD_ADDR"])
+def test_container_direct_construction_validates_text(name):
+    with pytest.raises(ValidationError):
+        Settings(**DIRECT, **{name: "not valid"})
+
+
+@pytest.mark.parametrize(
+    "name,bad",
+    [
+        ("NOMAD_ADDR", "ftp://LEAK-host"),
+        ("NOMAD_NAMESPACE", "LEAK/ns"),
+        ("RAG_CONTAINER_IMAGE", "LEAK:latest"),
+        ("RAG_CONTAINER_CPU_MHZ", "LEAK"),
+        ("RAG_CONTAINER_MEMORY_MB", "LEAK"),
+        ("RAG_CONTAINER_TIMEOUT_S", "LEAK"),
+        ("RAG_CONTAINER_MAX_INPUT_BYTES", "LEAK"),
+        ("RAG_CONTAINER_MAX_OUTPUT_BYTES", "LEAK"),
+        ("NOMAD_CACERT", "LEAK\x00"),
+    ],
+)
+def test_bad_container_values_never_echoed(name, bad):
+    err = error_for(valid_env(**{name: bad}))
+    assert name in str(err)
+    assert "LEAK" not in f"{err} {err!r} {full_trace(err)}"
+
+
+def test_container_problems_are_reported_together_with_the_api_ones():
+    err = error_for({"NOMAD_NAMESPACE": "a b", "RAG_CONTAINER_IMAGE": "x"})
+    for name in (*REQUIRED, "NOMAD_NAMESPACE", "RAG_CONTAINER_IMAGE"):
+        assert name in str(err)
+
+
+def test_nomad_token_not_reachable_from_traceback_locals(monkeypatch):
+    for name in Settings.model_fields:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", API_KEY)
+    monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
+    monkeypatch.setenv("QDRANT_COLLECTION", "docs")
+    monkeypatch.setenv("NOMAD_ADDR", "http://nomad.example.com")
+    monkeypatch.setenv("NOMAD_TOKEN", "test-not-a-key-LEAK-nomad")
+    with pytest.raises(ConfigError) as excinfo:
+        load_settings()
+    trace = traceback.TracebackException.from_exception(excinfo.value, capture_locals=True)
+    assert "LEAK" not in "".join(trace.format())

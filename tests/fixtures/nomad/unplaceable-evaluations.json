@@ -1,0 +1,139 @@
+{
+ "body": [
+  {
+   "ClassEligibility": {
+    "v1:13739532566899875211": true
+   },
+   "CreateIndex": 37,
+   "CreateTime": 1793231934864424790,
+   "FailedTGAllocs": {
+    "g": {
+     "AllocationTime": 40430,
+     "ClassExhausted": null,
+     "ClassFiltered": null,
+     "CoalescedFailures": 0,
+     "ConstraintFiltered": null,
+     "DimensionExhausted": {
+      "memory": 1
+     },
+     "NodePool": "default",
+     "NodesAvailable": {
+      "dc1": 1
+     },
+     "NodesEvaluated": 1,
+     "NodesExhausted": 1,
+     "NodesFiltered": 0,
+     "NodesInPool": 1,
+     "QuotaExhausted": null,
+     "ResourcesExhausted": {
+      "gen": {
+       "CPU": 0,
+       "Cores": 0,
+       "Devices": null,
+       "DiskMB": 0,
+       "IOPS": 0,
+       "MemoryMB": 900000,
+       "MemoryMaxMB": 0,
+       "NUMA": null,
+       "Networks": null,
+       "SecretsMB": 0
+      }
+     },
+     "ScoreMetaData": null,
+     "Scores": null
+    }
+   },
+   "ID": "39d94ea0-1e52-e8b0-cb1c-7f4be07449e9",
+   "JobID": "rag-spike-unplaceable-30001d97",
+   "JobModifyIndex": 36,
+   "ModifyIndex": 37,
+   "ModifyTime": 1793231934864424790,
+   "Namespace": "default",
+   "PreviousEval": "575a87fa-bd3e-3dbc-2340-28d042e9d169",
+   "Priority": 50,
+   "SnapshotIndex": 36,
+   "Status": "blocked",
+   "StatusDescription": "created to place remaining allocations",
+   "TriggeredBy": "queued-allocs",
+   "Type": "batch"
+  },
+  {
+   "BlockedEval": "39d94ea0-1e52-e8b0-cb1c-7f4be07449e9",
+   "CreateIndex": 36,
+   "CreateTime": 1793231934863679501,
+   "FailedTGAllocs": {
+    "g": {
+     "AllocationTime": 40430,
+     "ClassExhausted": null,
+     "ClassFiltered": null,
+     "CoalescedFailures": 0,
+     "ConstraintFiltered": null,
+     "DimensionExhausted": {
+      "memory": 1
+     },
+     "NodePool": "default",
+     "NodesAvailable": {
+      "dc1": 1
+     },
+     "NodesEvaluated": 1,
+     "NodesExhausted": 1,
+     "NodesFiltered": 0,
+     "NodesInPool": 1,
+     "QuotaExhausted": null,
+     "ResourcesExhausted": {
+      "gen": {
+       "CPU": 0,
+       "Cores": 0,
+       "Devices": null,
+       "DiskMB": 0,
+       "IOPS": 0,
+       "MemoryMB": 900000,
+       "MemoryMaxMB": 0,
+       "NUMA": null,
+       "Networks": null,
+       "SecretsMB": 0
+      }
+     },
+     "ScoreMetaData": null,
+     "Scores": null
+    }
+   },
+   "ID": "575a87fa-bd3e-3dbc-2340-28d042e9d169",
+   "JobID": "rag-spike-unplaceable-30001d97",
+   "JobModifyIndex": 36,
+   "ModifyIndex": 38,
+   "ModifyTime": 1793231934864617439,
+   "Namespace": "default",
+   "PlanAnnotations": {
+    "DesiredTGUpdates": {
+     "g": {
+      "Canary": 0,
+      "DestructiveUpdate": 0,
+      "Disconnect": 0,
+      "Ignore": 0,
+      "InPlaceUpdate": 0,
+      "Migrate": 0,
+      "Place": 1,
+      "Preemptions": 0,
+      "Reconnect": 0,
+      "RescheduleLater": 0,
+      "RescheduleNow": 0,
+      "Stop": 0
+     }
+    },
+    "PreemptedAllocs": null
+   },
+   "Priority": 50,
+   "QueuedAllocations": {
+    "g": 1
+   },
+   "SnapshotIndex": 36,
+   "Status": "complete",
+   "TriggeredBy": "job-register",
+   "Type": "batch"
+  }
+ ],
+ "method": "GET",
+ "path": "/v1/job/rag-spike-unplaceable-30001d97/evaluations",
+ "status": 200
+}

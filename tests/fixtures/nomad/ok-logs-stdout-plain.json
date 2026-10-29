@@ -1,0 +1,14 @@
+{
+ "body": {
+  "answer": "echo:q {{ env \"X\" }} ${NOMAD_ALLOC_ID} \u00e9",
+  "input_tokens": 1,
+  "network": "OSError",
+  "output_tokens": 1,
+  "rootfs": "OSError",
+  "uid": 65532,
+  "v": 1
+ },
+ "method": "GET",
+ "path": "/v1/client/fs/logs/38f571c2-36f3-c1de-b4a4-c479a4456745?task=gen&type=stdout&plain=true",
+ "status": 200
+}

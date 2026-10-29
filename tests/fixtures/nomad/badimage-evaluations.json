@@ -1,0 +1,44 @@
+{
+ "body": [
+  {
+   "CreateIndex": 28,
+   "CreateTime": 1793231927845818005,
+   "ID": "a262590b-23d1-8569-6cc2-684081e19047",
+   "JobID": "rag-spike-badimage-83b7dfb5",
+   "JobModifyIndex": 28,
+   "ModifyIndex": 30,
+   "ModifyTime": 1793231927847832409,
+   "Namespace": "default",
+   "PlanAnnotations": {
+    "DesiredTGUpdates": {
+     "g": {
+      "Canary": 0,
+      "DestructiveUpdate": 0,
+      "Disconnect": 0,
+      "Ignore": 0,
+      "InPlaceUpdate": 0,
+      "Migrate": 0,
+      "Place": 1,
+      "Preemptions": 0,
+      "Reconnect": 0,
+      "RescheduleLater": 0,
+      "RescheduleNow": 0,
+      "Stop": 0
+     }
+    },
+    "PreemptedAllocs": null
+   },
+   "Priority": 50,
+   "QueuedAllocations": {
+    "g": 0
+   },
+   "SnapshotIndex": 28,
+   "Status": "complete",
+   "TriggeredBy": "job-register",
+   "Type": "batch"
+  }
+ ],
+ "method": "GET",
+ "path": "/v1/job/rag-spike-badimage-83b7dfb5/evaluations",
+ "status": 200
+}
